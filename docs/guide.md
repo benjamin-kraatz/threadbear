@@ -1346,6 +1346,8 @@ The Updates icon on the left-hand rail shows what's on its way for the app,
 the runner and the Claude Code and Codex tools. A grey dot means something
 is in progress and will sort itself out, and a coloured dot means it needs
 you. Right-click it for a quick Restart to Update.
+While the app or runner is building, its latest build output appears in the
+Updates panel and refreshes automatically.
 
 ### Mike's updates
 

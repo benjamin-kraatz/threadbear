@@ -91,6 +91,9 @@ struct UpdatesPanel: View {
             VStack(alignment: .leading, spacing: zoomed(14)) {
                 section("App") {
                     line(UpdatesText.appLine(side))
+                    if side.building {
+                        UpdateLogView(path: AppUpdater.logPath)
+                    }
                     if side.staged != nil {
                         Button("Restart to Update") { updater.restartToUpdate() }
                             .tip("Quit and reopen on the new version. Running threads carry on in the runner.")
@@ -104,6 +107,9 @@ struct UpdatesPanel: View {
                         let lines = [UpdatesText.buildLine(runner), UpdatesText.oldRunnersLine(runner), UpdatesText.launcherLine(runner)]
                         if lines.allSatisfy({ $0 == nil }) { line("The runner is up to date.") }
                         if let build = lines[0] { line(build) }
+                        if runner.state == "building" {
+                            UpdateLogView(path: app.dataDir.appendingPathComponent("runner/update.log").path)
+                        }
                         if let old = lines[1] {
                             line(old)
                             // The threads on the previous version, to jump to.
@@ -197,6 +203,42 @@ struct UpdatesPanel: View {
         Text(text)
             .font(.system(size: zoomed(12)))
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Read only the end, so a long build never loads its entire log into the panel.
+enum UpdateLogTail {
+    nonisolated static func read(_ url: URL) -> String? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        guard let size = try? file.seekToEnd() else { return nil }
+        try? file.seek(toOffset: size > 8192 ? size - 8192 : 0)
+        guard let data = try? file.readToEnd(), !data.isEmpty else { return nil }
+        let text = String(decoding: data, as: UTF8.self)
+        return text.split(separator: "\n", omittingEmptySubsequences: true)
+            .suffix(8).map { String($0.suffix(300)) }.joined(separator: "\n")
+    }
+}
+
+private struct UpdateLogView: View {
+    let path: String
+    @State private var output: String?
+
+    var body: some View {
+        Text(output ?? "Waiting for build output…")
+            .font(.system(size: zoomed(10), design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: path) {
+            while !Task.isCancelled {
+                let value = await Task.detached(priority: .utility) {
+                    UpdateLogTail.read(URL(fileURLWithPath: path))
+                }.value
+                output = value
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 }
 
