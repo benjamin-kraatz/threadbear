@@ -19,6 +19,9 @@ enum RowMetrics {
     /// One line of work: a group summary, a tool call, a thinking block.
     static var workHeight: CGFloat { zoomed(32) }
     static var workingHeight: CGFloat { zoomed(34) }
+    /// The bear beside a "Woke up" note, and all the room it takes.
+    static var wokenBearSide: CGFloat { zoomed(18) }
+    static var wokenBearRoom: CGFloat { wokenBearSide + zoomed(6) }
     static var bubblePadH: CGFloat { zoomed(14) }
     static var bubblePadV: CGFloat { zoomed(10) }
     static var bubbleRadius: CGFloat { zoomed(18) }
@@ -490,8 +493,11 @@ enum RowRenderer {
                 return RowRender(height: RowMetrics.workHeight, text: header, textSize: header.size())
             }
             let text = NSAttributedString(string: note, attributes: Theme.text(Theme.smallFont, color: Theme.quietText, line: TypeScale.scaled(17), alignment: .center))
-            let size = measurer.measure(text, width: width)
-            return RowRender(height: vertical + size.height, text: text, textSize: size)
+            // A wake note's bear sits left of the words, and they stay
+            // centred, so they leave its room on both sides.
+            let woke = row.content.isWakeNote
+            let size = measurer.measure(text, width: woke ? width - 2 * RowMetrics.wokenBearRoom : width)
+            return RowRender(height: vertical + (woke ? max(size.height, RowMetrics.wokenBearSide) : size.height), text: text, textSize: size)
 
         case .error(let message, let kind):
             let text = NSMutableAttributedString(string: message, attributes: Theme.text(color: .systemRed))
@@ -1074,9 +1080,10 @@ enum RowRenderer {
             let call = ToolCall(itemId: request.approvalId, name: request.name, kind: request.name == "Write" ? .write : .edit,
                                 title: request.title, input: input)
             if let diff = DiffBuilder.diff(forTool: call), !diff.hunks.isEmpty {
-                // A file Threadbear runs as code shows every line it writes:
-                // a hook past the eighth line is still a hook.
+                // A file Threadbear runs as code, or can't rule out, shows
+                // every line it writes: a hook past the eighth line is still a hook.
                 let code = request.title.contains("Threadbear runs this file as code")
+                    || request.title.contains("Threadbear can't tell whether this file runs as code")
                 return diffText([diff], maxLines: code ? 1_000_000 : 8, inset: 0).0
             }
             return mono(ToolPresentation.shortTitle(ApprovalText.filePath(request) ?? "", limit: 300), Theme.quietText)
@@ -1639,6 +1646,15 @@ enum RowRenderer {
         ]))
         output.append(arrow("›", page + 1))
         return output
+    }
+
+    /// Where a paged card's page number is in its text: the 2 of "2 of 3",
+    /// which `asksHeading` sets off with non-breaking spaces, so an ask's
+    /// own "2 of 3" further on isn't taken for it.
+    static func pageNumberRange(in text: String) -> NSRange? {
+        guard let match = text.range(of: "\u{00A0}\u{00A0}[0-9]+ of [0-9]+\u{00A0}\u{00A0}", options: .regularExpression) else { return nil }
+        let found = text[match].drop { !$0.isNumber }.prefix { $0.isNumber }
+        return NSRange(found.startIndex..<found.endIndex, in: text)
     }
 
     /// The done card: the agent said nothing waits on Mike, so it says

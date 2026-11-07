@@ -151,6 +151,163 @@ final class ClickFeedbackTests: XCTestCase {
         XCTAssertNil(app.threads["th1"]?.wakeWhen)
     }
 
+    // MARK: Hibernate
+
+    /// A row hibernated without being open has no flight, but the moon
+    /// stirs at once so the eye knows where it went.
+    func testHibernatingARowThatIsntOpenStirsTheMoon() async throws {
+        let (app, _) = try await connected()
+        XCTAssertEqual(app.hibernateLandings, 0)
+        app.snooze("th1", until: Date().addingTimeInterval(3600))
+        XCTAssertEqual(app.hibernateLandings, 1)
+        XCTAssertNotNil(app.threads["th1"]?.snoozedUntil, "and it's put away at once")
+        XCTAssertTrue(app.flyingToHibernate.isEmpty)
+        app.snoozeUntilRestart("th1")
+        XCTAssertEqual(app.hibernateLandings, 2)
+        app.hibernateWhen("th1", said: "at the weekend")
+        XCTAssertEqual(app.hibernateLandings, 3)
+    }
+
+    /// A starred thread stays in Starred however long it sleeps, so nothing
+    /// tells him it went to the moon.
+    func testAStarredThreadDoesntStirTheMoon() async throws {
+        let (app, _) = try await connected()
+        app.threads["th1"]?.starredAt = Date()
+        app.snooze("th1", until: Date().addingTimeInterval(3600))
+        XCTAssertEqual(app.hibernateLandings, 0)
+    }
+
+    /// While a row animates away its marker is still in the window beside
+    /// the new one, and SwiftUI makes, updates and attaches the two in no
+    /// fixed order. The newest in the window wins whatever the order: the
+    /// old one holding on, or nothing once it goes, landed the flight a row
+    /// short of its heading.
+    func testTheNewestMarkerInTheWindowWins() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let old = FlightMarkerView(kind: .openRow)
+        window.contentView?.addSubview(old)
+        ArchiveFlight.register(old)
+        XCTAssertTrue(ArchiveFlight.openRow === old)
+        // The new one is made before it has a window, then the old one is
+        // updated, then the new one goes on screen.
+        let new = FlightMarkerView(kind: .openRow)
+        ArchiveFlight.register(new)
+        XCTAssertTrue(ArchiveFlight.openRow === old, "not in a window yet")
+        window.contentView?.addSubview(new)
+        XCTAssertTrue(ArchiveFlight.openRow === new)
+        old.removeFromSuperview()
+        XCTAssertTrue(ArchiveFlight.openRow === new)
+        new.removeFromSuperview()
+        XCTAssertNil(ArchiveFlight.openRow)
+    }
+
+    /// Hibernating aims at Archived's box only when there's no Hibernating
+    /// heading yet. One that's there but scrolled out of sight sends the
+    /// page off the bottom of the list, not into the wrong heading.
+    func testHibernatingWithItsHeadingOutOfSightDoesntAimAtArchived() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 400), styleMask: [], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        // A sidebar that scrolls, its top in view: what's below 400 isn't.
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 1200))
+        scroll.documentView = content
+        window.contentView?.addSubview(scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 800))
+        let list = FlightMarkerView(kind: .inboxList), archived = FlightMarkerView(kind: .archiveBox)
+        list.frame = NSRect(x: 0, y: 0, width: 200, height: 1200)
+        archived.frame = NSRect(x: 10, y: 1100, width: 14, height: 14)
+        for view in [list, archived] {
+            content.addSubview(view)
+            ArchiveFlight.register(view)
+        }
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: false)?.onHeading, true, "no Hibernating heading yet, so its moon will come where Archived's box is")
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: true)?.onHeading, false, "there, but the lazy list hasn't drawn it")
+        let moon = FlightMarkerView(kind: .hibernateBox)
+        moon.frame = NSRect(x: 10, y: 200, width: 14, height: 14)
+        content.addSubview(moon)
+        ArchiveFlight.register(moon)
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .hibernate, headingThere: true)?.onHeading, false, "drawn, but scrolled out of sight")
+        XCTAssertEqual(ArchiveFlight.target(in: window, to: .archive)?.onHeading, true)
+        scroll.removeFromSuperview()
+    }
+
+    /// The empty-inbox bear waits for a page leaving the Inbox, but not for a
+    /// starred or sleeping thread's, which leaves a bear that's already there
+    /// alone.
+    func testOnlyAFlightLeavingTheInboxHoldsUpTheBear() async throws {
+        let (app, _) = try await connected()
+        app.threads["th2"] = ThreadSummary(id: "th2", title: "Starred")
+        app.threads["th2"]?.starredAt = Date()
+        app.threads["th3"] = ThreadSummary(id: "th3", title: "Asleep")
+        app.threads["th3"]?.snoozedUntil = Date().addingTimeInterval(3600)
+        app.noteFlightLeaving("th2")
+        app.noteFlightLeaving("th3")
+        XCTAssertFalse(app.flightLeavingTheInbox)
+        app.noteFlightLeaving("th1")
+        XCTAssertTrue(app.flightLeavingTheInbox)
+    }
+
+    // MARK: Inbox zero in the pane
+
+    /// Archiving the last thread from its own pane brings the bear to the
+    /// new thread page (straight away here, as there's no window for the
+    /// page to fly in).
+    func testArchivingTheLastThreadFromItsPaneBringsTheBear() async throws {
+        let (app, _) = try await connected()
+        app.selection = "th1"
+        app.archive("th1")
+        XCTAssertNil(app.selection)
+        XCTAssertEqual(app.inboxZeroBear, .shown)
+    }
+
+    func testArchivingWithOthersLeftOrFromTheSidebarDoesnt() async throws {
+        let (app, _) = try await connected()
+        app.threads["th2"] = ThreadSummary(id: "th2", title: "Another")
+        app.selection = "th1"
+        app.archive("th1")
+        XCTAssertNil(app.inboxZeroBear, "th2 is still in the inbox")
+        app.selection = nil
+        app.archive("th2")
+        XCTAssertNil(app.inboxZeroBear, "archived from its row, with no pane on it")
+    }
+
+    // MARK: The card settling in
+
+    /// Rises and fades on its layer, so it runs whatever the main thread's
+    /// doing as a turn ends, and it's over quickly.
+    func testTheCardSettlesInOnItsLayer() throws {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        view.wantsLayer = true
+        ComposerCardHost.settle(view)
+        let animation = try XCTUnwrap(view.layer?.animation(forKey: ComposerCardHost.settleKey))
+        XCTAssertEqual(animation.duration, 0.2, accuracy: 0.05)
+    }
+
+    /// The done tick drawn over the text's sits exactly where the text's
+    /// was, and that goes see-through while it draws, then comes back.
+    func testTheDoneTickDrawsOverTheTextsOwnThenGoesAway() async throws {
+        let card = AsksCard(seq: 7, asks: [], next: ["Carry on"])
+        let row = TranscriptRow(id: "ak:7", seq: 7, turnId: "t1", content: .asks(card))
+        let cell = TextRowCell()
+        cell.bare = true
+        let render = ComposerCardHost.render(row, width: 500)
+        cell.frame = NSRect(x: 0, y: 0, width: 500, height: render.height)
+        cell.configure(row: row, render: render, tableWidth: 500, expanded: false)
+        let storage = try XCTUnwrap(cell.textView.textStorage)
+        let before = try XCTUnwrap(storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        let views = cell.subviews.count
+        cell.drawDoneTickOn()
+        XCTAssertEqual(cell.subviews.count, views + 1)
+        let during = storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
+        XCTAssertFalse(during === before)
+        XCTAssertEqual(during?.bounds, before.bounds, "the same size, so nothing moves")
+        try await until { cell.subviews.count == views }
+        XCTAssertTrue(storage.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment === before)
+    }
+
     // MARK: Projects
 
     func testAProjectEditShowsAtOnceAndARefusalPutsItBack() async throws {

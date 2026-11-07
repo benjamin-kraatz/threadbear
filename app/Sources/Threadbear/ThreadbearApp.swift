@@ -62,8 +62,10 @@ struct ThreadbearApp: App {
                         .shortcut(.settings)
                 }
             }
-            CommandGroup(after: .appInfo) {
+            // The Den, in place of the stock About panel.
+            CommandGroup(replacing: .appInfo) {
                 IconMenuItems {
+                    Button("About Threadbear", systemImage: "pawprint") { DenWindow.show(app: app) }
                     // Only while a newer build is staged (AppUpdater).
                     if let staged = updater.staged {
                         Button("Restart to Update to \(staged.short)", systemImage: "arrow.clockwise") { updater.restartToUpdate() }
@@ -195,6 +197,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var linkedThread: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A voice server the last run left behind by crashing (VoiceServer).
+        VoiceServer.reapLeftover()
         MainActor.assumeIsolated {
             let app = AppModel.shared
             let arguments = CommandLine.arguments
@@ -226,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             // Not over the pages a screenshot, perf or scripted run opens.
             Tour.shared.introsEnabled = !scripted
             if !scripted { Notifier.setUp(delegate: self) }
+            if !scripted { app.milestones = MilestoneWatch() }
             app.onThreadsLoaded = { [weak self] in
                 LaunchClock.threadsLoaded()
                 if let threadId = self?.linkedThread {
@@ -275,6 +280,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             ActivityRecorder.shared.quit()
+            VoiceMode.shared.stop()
+            VoiceServer.shared.stop()
             AppUpdater.shared.applyAtQuit()
         }
     }

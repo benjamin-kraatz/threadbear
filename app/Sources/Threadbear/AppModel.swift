@@ -106,6 +106,9 @@ final class AppModel {
     /// its draft stays in the box, greyed and locked, with a spinner for
     /// Send, so the click visibly did something however slow the runner is.
     var creatingThread = false
+    /// This Mac's runner's experiments that are on (hello's `experiments`),
+    /// for the ones that live in the app: Voice mode.
+    var experiments: Set<String> = []
     /// How long a thread may sit idle with one of Mike's messages still
     /// queued before the app gives up on it showing.
     static let queuedGrace: Double = 10
@@ -132,6 +135,32 @@ final class AppModel {
     var flyingToArchive: Set<String> = []
     /// How many of those have landed, for the heading's box to bounce.
     var archiveLandings = 0
+    /// Archiving the last thread there was, from its own pane: the bear's
+    /// due in the pane once the archived page has landed, then it's there
+    /// until he types or opens a thread (`PaneBear`).
+    var inboxZeroBear: InboxZeroBear?
+    enum InboxZeroBear { case due, shown }
+    /// The same for Hibernating: threads whose panel is still sinking into
+    /// its heading, and how many have landed for the moon to dip.
+    var flyingToHibernate: Set<String> = []
+
+    /// Pages in flight that left an Inbox or Running row, noted as each one
+    /// sets off. The empty-inbox bear waits for those to land, as arriving
+    /// under the heading mid-flight would push it down and the page would
+    /// land short. A starred or sleeping thread's flight doesn't hold it up:
+    /// the Inbox was already empty, so a bear already there stays put rather
+    /// than blinking off and on under the page.
+    var leavingTheInbox: Set<String> = []
+    var flightLeavingTheInbox: Bool { !leavingTheInbox.isEmpty }
+
+    /// Notes where a flight is leaving from, before the thread moves.
+    func noteFlightLeaving(_ threadId: String) {
+        let sections = sections
+        if sections.inbox.contains(where: { $0.id == threadId }) || sections.running.contains(where: { $0.id == threadId }) {
+            leavingTheInbox.insert(threadId)
+        }
+    }
+    var hibernateLandings = 0
     /// The note at the top of the thread panel after Mike archives a thread
     /// here, with Undo; a click on it opens the thread (Mike asked 30 Oct).
     /// Not for one an agent or the phone archives. `ArchivedToast` takes it
@@ -141,6 +170,11 @@ final class AppModel {
     /// (⌥⌘↓) has nowhere to go: the open thread is the Inbox's last, or the
     /// Inbox is empty. `InboxEndToast` takes it down after a few seconds.
     var inboxEndNote: InboxEndNote?
+    /// The note at the top of the thread panel when the thread count passes
+    /// a milestone. `MilestoneToast` takes it down.
+    var milestoneNote: MilestoneNote?
+    /// Nil in scripted runs and tests, which never show that note.
+    @ObservationIgnored var milestones: MilestoneWatch?
     /// Bumped when a thread is picked from somewhere other than the list
     /// (Next Inbox Thread), so the list scrolls its row into view.
     var revealSelectionRequests = 0
@@ -380,6 +414,9 @@ final class AppModel {
     /// heartbeat in between doesn't snap the rows back. Nil with none to give.
     var runnerOrder: [String]?
     @ObservationIgnored var pendingRunnerOrder: [String]?
+    /// Screenshots only: holds the top runner mid-drag by this much, as a
+    /// script can't hold a real drag still to photograph it.
+    @ObservationIgnored var runnerDragPreview: CGSize?
     /// Each runner's machine figures by runner id (`runners.stats`), asked
     /// every 10 s while a runner's details are open in the Runners panel.
     var runnerStats: [String: RunnerMachineStats] = [:]
@@ -471,6 +508,8 @@ final class AppModel {
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?
+    /// His standing instructions for every session; nil: no box (InstructionsModel.swift).
+    var standingInstructions: StandingInstructions?
     /// The runner is from before settings (it answers -32601).
     var settingsUnsupported = false
     /// Why the last change in the Settings window didn't take, shown there.

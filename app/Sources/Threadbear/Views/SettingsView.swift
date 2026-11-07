@@ -16,6 +16,12 @@ struct SettingsView: View {
             GeneralSettings()
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
+            // Only with the experiment on (VoiceMode.experiment).
+            if app.experiments.contains(VoiceMode.experiment) {
+                VoiceSettings()
+                    .tabItem { Label("Voice", systemImage: "waveform") }
+                    .tag(SettingsTab.voice)
+            }
             ModelSettings()
                 .tabItem { Label("Models", systemImage: "sparkles") }
                 .tag(SettingsTab.models)
@@ -163,6 +169,8 @@ private struct GeneralSettings: View {
                     }
                 }
 
+                InstructionsSection()
+
                 // One reply, Bullet replies, the two live-CLI steppers and
                 // Follow main left here on 2 Nov: Mike wants as few settings
                 // as possible, the defaults suit nearly everyone, and anyone
@@ -204,6 +212,7 @@ private struct GeneralSettings: View {
 
                 SettingsErrorRow()
             }
+            .task { app.loadStandingInstructions() }
             .formStyle(.grouped)
             .fixedSize(horizontal: false, vertical: true)
             // The window fits the form; a scroller beside it is just noise

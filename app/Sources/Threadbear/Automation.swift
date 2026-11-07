@@ -187,6 +187,20 @@ enum Automation {
             try? await Task.sleep(for: .milliseconds(15))
         }
         guard let window = SettingsWindow.current, window.isVisible else { return "error the Settings window didn't open" }
+        // {"front": true}: in front and key, for real events on a desktop
+        // nobody's using (Tinker Desk). Says its number and where it is, top
+        // left, in screen points. A gesture of SwiftUI's own ignores a window
+        // that isn't key, so `point` can't reach those behind Mike's windows.
+        if c["front"] as? Bool == true {
+            // Floating: macOS can refuse a script's activate, and then a
+            // normal window stays under whatever's in front.
+            window.level = .floating
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            let top = (NSScreen.screens.first?.frame.height ?? 0) - window.frame.maxY
+            return "ok front \(window.windowNumber) \(Int(window.frame.minX)) \(Int(top))"
+        }
         window.tuckBehind()
         // Let the tab switch and the window's new height settle.
         try? await Task.sleep(for: .milliseconds(400))
@@ -329,9 +343,12 @@ enum Automation {
             // (points from the window's top left), with "toX" and "toY" drags there,
             // and "scrollX"/"scrollY" is a wheel, in lines. They go straight
             // to the window, so Mike's pointer stays where it is.
-            // {"review": id}: in that review's own window.
+            // {"review": id}: in that review's own window. {"settings": true}:
+            // in the Settings window. "holdMs" waits with the button still
+            // down at the end of a drag, for a `shot` of it mid-drag.
             let reviewWindow = (c["review"] as? String).flatMap { id in app.reviewWindows.values.first { $0.session.review.id == id }?.window }
-            guard let window = reviewWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
+            let settingsWindow = c["settings"] as? Bool == true ? SettingsWindow.current : nil
+            guard let window = reviewWindow ?? settingsWindow ?? window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error point needs x and y" }
             let at = { (px: Double) in NSPoint(x: px, y: window.frame.height - y) }
             // Anywhere on the way from the start to (toX, toY), `t` from 0 to 1.
             let endY = (c["toY"] as? Double) ?? y
@@ -381,6 +398,7 @@ enum Automation {
                     try? await Task.sleep(for: .milliseconds(16))
                 }
             }
+            if let hold = c["holdMs"] as? Double { try? await Task.sleep(for: .milliseconds(hold)) }
             if let up = mouse(.leftMouseUp, along(1, end)) { window.sendEvent(up) }
             try? await Task.sleep(for: .milliseconds(350))
             return "ok"
@@ -599,6 +617,18 @@ enum Automation {
             guard let button = buttons.last else { return "error no button \(title)" }
             button.performClick(nil)
             return "ok"
+        case "click-at":
+            // A click at a point in the main window, in points from its
+            // top left, through the window as a real one goes, without moving
+            // the pointer. For what has no tooltip to find it by.
+            guard let window, let x = c["x"] as? Double, let y = c["y"] as? Double else { return "error needs x and y" }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: window.frame.height - y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+                else { return "error no event" }
+                window.sendEvent(event)
+            }
+            return "ok"
         case "press-button":
             // {"cmd":"press-button","id":"b7k2abcd"} (or "title":"Fill in the
             // form") clicks a reply button in the open thread as its pill
@@ -635,6 +665,10 @@ enum Automation {
             guard let id = target.id else { return target.error }
             app.setStarred(id, name == "star")
             return "ok \(id)"
+        case "milestone":
+            // Scripted runs never earn the note, so this is how to see it.
+            app.milestoneNote = MilestoneNote(tier: c["tier"] as? Int ?? 1000)
+            return "ok"
         case "undo-archive":
             // The Archived note's Undo.
             guard let id = app.archivedNote?.threadId else { return "error no archived note" }
@@ -1055,6 +1089,25 @@ enum Automation {
             // give AppKit a moment to redraw in the new one.
             try? await Task.sleep(for: .milliseconds(200))
             return "ok \(mode)"
+        case "voice-stage":
+            // Shows Voice mode's bear in a phase, with no microphone or
+            // engine (screenshots of the avatar); "off" puts it away.
+            guard let id = app.selection else { return "error no thread is open" }
+            // The experiment, for this look only: the mock's hello hasn't it.
+            app.experiments.insert(VoiceMode.experiment)
+            let words = c["text"] as? String ?? ""
+            let level = Float(number(c["level"]) ?? 0)
+            switch c["phase"] as? String {
+            case "listening": VoiceMode.shared.stage(.listening, threadId: id, level: level)
+            case "hearing": VoiceMode.shared.stage(.hearing(words), threadId: id, level: level)
+            case "thinking": VoiceMode.shared.stage(.thinking, threadId: id, level: level)
+            case "speaking": VoiceMode.shared.stage(.speaking, threadId: id, level: level)
+            case "starting": VoiceMode.shared.stage(.starting(words.isEmpty ? "Getting ready…" : words), threadId: id, level: level)
+            case "off": VoiceMode.shared.stage(.off, threadId: nil, level: 0)
+            default: return "error phase is listening, hearing, thinking, speaking, starting or off"
+            }
+            try? await Task.sleep(for: .milliseconds(300))
+            return "ok"
         case "zoom":
             // What ⌘=, ⌘- and ⌘0 do, or a percent from TextZoom.steps.
             let zoom = TextZoom.shared
@@ -1169,6 +1222,24 @@ enum Automation {
             return composer.debugHoverChip(number).map { "ok window \($0)" } ?? "error no chip \(number) with a card"
         case "select-text":
             return select(c, app: app)
+        case "den":
+            // Threadbear > About Threadbear, through the menu item itself.
+            guard let menu = NSApp.mainMenu?.items.first?.submenu,
+                  let index = menu.items.firstIndex(where: { $0.title == "About Threadbear" }) else { return "error no About Threadbear in the app menu" }
+            menu.update()
+            menu.performActionForItem(at: index)
+            try? await Task.sleep(for: .milliseconds(200))
+            return DenWindow.current?.isVisible == true ? "ok " + menu.items.prefix(3).map(\.title).joined(separator: " | ") : "error the Den didn't open"
+        case "room":
+            // Every login's room, as the honey pot and Usage see it:
+            // {"percent": 44}. Lasts until the runner next says otherwise.
+            guard let percent = c["percent"] as? Double else { return "error needs percent" }
+            app.accounts = app.accounts.map {
+                var account = $0
+                account.usage = AccountUsage(windows: [UsageWindow(kind: "weekly", title: "Weekly", remainingPercent: percent)])
+                return account
+            }
+            return "ok"
         case "account-ids":
             // For screenshots: accounts are titled by their email address,
             // so show their ids instead. Lasts until the next reconnect.
@@ -1216,6 +1287,8 @@ enum Automation {
             guard let path = c["path"] as? String, path.hasPrefix("/") else { return "error path must be absolute" }
             if let refused = refusesToWrite(path) { return refused }
             guard var window else { return "error no window" }
+            // {"den": true}: About Threadbear (open it with `den`).
+            if c["den"] as? Bool == true, let den = DenWindow.current { window = den }
             // {"review": id}: its own window.
             if let id = c["review"] as? String {
                 if let review = app.reviewWindows.values.first(where: { $0.session.review.id == id })?.window {

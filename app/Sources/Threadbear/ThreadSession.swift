@@ -21,6 +21,9 @@ final class ThreadSession {
     nonisolated static let eventsPage = 500
 
     let threadId: String
+    /// Mike opened this thread with it still saying "Woke up", so the bear on
+    /// its newest wake note plays its waking up, the first time it's shown.
+    @ObservationIgnored var wakeUpPending = false
     /// Set for a sub-agent's transcript: read-only, read whole from
     /// `threads.subagent` (again for more while it runs), never subscribed.
     let subagentId: String?
@@ -342,6 +345,7 @@ final class ThreadSession {
 
     func receive(_ event: Event) {
         guard state == .loaded else { return }
+        if subagentId == nil { VoiceMode.shared.receive(event) }
         handle(feed.receive(event))
     }
 
@@ -544,6 +548,14 @@ final class ThreadSession {
         view?.apply(removed: removed, inserted: inserted, updated: updated)
     }
 
+    private static func cardSeq(_ row: TranscriptRow?) -> Int? {
+        if case .asks(let card)? = row?.content { return card.seq }
+        return nil
+    }
+
+    /// The card that's just turned up, until the composer has settled it in.
+    @ObservationIgnored var arrivingCard: Int?
+
     private func syncOpenCard() {
         if feed.model.openTurn == nil {
             let latest = feed.model.rows.reversed().lazy.compactMap { row -> TurnCompletion? in
@@ -556,6 +568,9 @@ final class ThreadSession {
         }
         let card = feed.model.openCard
         guard card != openCard else { return }
+        // A card turning up as he watches, rather than one that was there
+        // when the thread opened: only this one settles in (`ComposerCard`).
+        if let seq = Self.cardSeq(card), seq != Self.cardSeq(openCard), state == .loaded, !rebuilding, view != nil { arrivingCard = seq }
         openCard = card
         app?.relayCardChanged(threadId)
     }
@@ -798,6 +813,15 @@ final class ThreadSession {
                 app?.show(error)
             }
         }
+    }
+
+    /// The approval card as this thread shows it now, nil once it's settled
+    /// or not there (Voice checks a spoken answer against it).
+    func openApproval(_ approvalId: String) -> ApprovalRequest? {
+        guard !answering.contains(approvalId),
+              case .approval(let item)? = feed.model.item(id: "ap:\(approvalId)")?.content,
+              item.resolution == nil else { return nil }
+        return item.request
     }
 
     /// Go ahead on a "Plan first" plan card (docs/protocol.md).

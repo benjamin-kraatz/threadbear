@@ -34,7 +34,8 @@ sort it newest first or oldest first instead, which is handy for working
 through a long inbox from the bottom up. ⌥⌘↓ (Go > Next Inbox Thread)
 opens the thread below the open one in the Inbox, or the Inbox's first if
 the open one is somewhere else; past the last one, a note says you're
-caught up. Running holds threads whose agent is
+caught up. When your threads pass 100, and each thousand after (archived ones
+count), a note says so once, the next time you're at the app. Running holds threads whose agent is
 working now. A thread that
 asks you something keeps its place in the inbox, wake-up or not, and so does
 one that has left a job running while it waits for you. Sub-agents are
@@ -87,6 +88,10 @@ At the right of the row:
   off.
 - A grey spinner with something like "2 sub-agents": the turn has ended
   but helpers or jobs it started are still going.
+- The blue dot, with an approval card at the end of the thread and no
+  grey line: a sub-agent is waiting on your answer. It waits as long as it
+  takes, whatever the agent does in the meantime, and carries on when you
+  answer. Stop closes the card and stops that sub-agent.
 - A time: the thread is idle, or the blue dot on the left says it's
   waiting on you. After a while Threadbear stops an idle
   thread's agent to save memory, and your next message starts it again
@@ -316,8 +321,10 @@ shown on the composer (the box you type in) and changed by clicking it.
 
 In Ask before edits and Auto, an edit to a file Threadbear runs by itself
 (a patch, a file a patch uses, or Claude Code's settings) always asks, with
-no Always allow, and the card says Threadbear runs the file as code. Even
-once you allow it, the patch waits for you to trust it in Patches.
+no Always allow, and the card says Threadbear runs the file as code. If a
+patch runs something Threadbear can't follow, every edit asks, and the card
+says it can't tell whether the file runs as code. Even once you allow it, the
+patch waits for you to trust it in Patches.
 
 The mode belongs to one thread. A new thread starts on Full access again
 unless you pick otherwise, so if you're unsure about a task, switch it to Ask
@@ -478,8 +485,10 @@ the moon, or use the Thread menu or the ... menu. Pick when it should
 come back: in an hour, this evening, tomorrow, next Monday, or a day on a calendar and a
 time of your own. It leaves the list, its agent stops, and it comes back marked unread
 when the time comes. Its row says Woke up until you open it, and the
-thread says how long it was away. Hibernating threads wait in the Hibernating section at
-the foot of the list, soonest to wake first.
+thread says how long it was away, beside a bear that's only just got up. Hibernating threads wait in the Hibernating section at
+the foot of the list, soonest to wake first. Hibernate the thread you have
+open and its page sinks into the moon on that heading as the next thread
+comes in.
 
 Or pick Wake when… and say it in your own words: "at the weekend", "in a
 few weeks", "next time I talk about woodworking". Opus works out what you
@@ -494,7 +503,8 @@ left with the mouse) and let go once the space behind it turns blue (a
 quick flick works too). However it's archived (⌘E, a button, or an agent
 or your phone doing it), its row slides off the same way. Archive the
 thread you have open and its page drops into the Archived heading as the
-next thread comes in. When you archive one, a note saying so floats at
+next thread comes in. If it was the last one, the bear comes up over the
+new thread page and waves. When you archive one, a note saying so floats at
 the top of the thread panel for a few seconds (longer while the pointer's
 on it): Undo puts the thread back, and a click anywhere else on it opens
 the thread. The Archived section at the foot of the list has
@@ -505,8 +515,9 @@ there, puts one back.
 Back and Forward (⌘[ and ⌘], in the Go menu) step through the threads and
 pages you've had open, as a browser does. A mouse's side buttons do the same,
 and so does a trackpad swipe, as in Safari: right for Back, left for Forward,
-with an arrow at the window's edge that follows your fingers. A swipe that
-starts mostly up or down is a scroll, so a long thread still scrolls. It
+with an arrow at the window's edge that follows your fingers and turns blue
+once letting go will go. A swipe that starts mostly up or down is a scroll, so
+a long thread still scrolls. It
 follows Swipe between pages in System Settings > Trackpad (two or three
 fingers). Over a thread's row a swipe left still archives it.
 
@@ -681,7 +692,8 @@ It files each thread in a project, making one when none fits, keeps each
 project's state up to date, adds a repo to a project's folders once its
 threads work there, and renames threads that have wandered off from their
 title (never one you named). It also looks after the Pocket cards threads
-filed.
+filed. Its picture, and the one on the Scheduled page, say something if you
+poke them.
 
 It looks after a thread's first message and when a turn ends, then catches
 up at most every 20 minutes while the thread keeps going. A catch-up after
@@ -715,6 +727,11 @@ it on another pool or one login. Click a heading to fold it away (Done starts fo
 folded one shows how many are under it. Its page
 says what's coming up next with a few numbers: how many are on, due in the
 next day, repeating, set by threads, paused, and how often they've run.
+
+A schedule's message brings an archived thread out of the archive while it
+runs. If the run ends with nothing for you, the thread goes back into the
+archive, so a watcher you've put away only lands in your inbox when it has
+something you need to act on.
 
 If you run Threadbear on more than one Mac (or on a Linux server as well,
 INSTALL.md section 6), a schedule that starts a new
@@ -768,7 +785,7 @@ thread on another Mac, pick it with the machine chip on the composer: the
 folder, account and model are then that Mac's. New threads start on the
 starred one: change it under Default in that chip's menu, or in
 Settings > Runners, which also lists your runners and whether they're
-online, in your order: drag one by its handle to change it. The
+online, in your order: drag one to change it. The
 phone has the same order, and a new thread from it starts on the first
 runner that's online in it. Adding, renaming or pairing a runner is done on its own machine,
 so ask an agent to do it for you. Schedules need your
@@ -854,7 +871,8 @@ beside the logins it says it has, and `tb runner logins <runnerId>
 claude:you@example.com` sets it. Your first Mac goes by its own readings,
 never that Mac's.
 
-Usage, near the bottom of the left-hand rail, shows how much room each login
+Usage, the honey pot near the bottom of the left-hand rail (it's filled to the
+room left on the login your next new thread would use), shows how much room each login
 has left before it hits its limits: the weekly one, and the 5-hour one for
 logins that still have it (Claude Team does, Max plans don't any more).
 Threadbear learns these numbers from the threads it runs, so a login's bars
@@ -1041,8 +1059,8 @@ phone fetches less. A thread's finished turns
 fold into one Worked line above the reply, as on the Mac; tap it to see
 the work. The search at the top of the inbox finds any thread, hibernating
 and archived ones too, by its title, last reply or project. What a thread needs from you shows under its reply with the
-likely answers as buttons (type in the box to say something else), and
-a thread that's done offers its suggested next steps and Archive, which takes you back to the inbox as its row slides away. A new thread from the phone starts in your default folder; pick its model and effort under the message, or leave them on Default. With more than one runner it starts on the first one that's online in your order, so a sleeping Mac doesn't hold it up; pick another under Runner, or change the order in Settings > Runners > Change the order. The sheet closes as soon as you tap Start, and a row at the top of the inbox says Starting until that Mac has made the thread, which then opens. If it couldn't start, the row says why; tap it to open it again as you left it, photos and choices too. Paste a photo straight into any message box, or add one with the photo button: it goes in where the cursor is as a chip, "Picture 1", as on the Mac, and pictures in your messages show as chips too. Pictures an agent puts in its reply or pins show in the thread, and animated GIFs play; tap one to see it full screen and pinch to zoom. An MP4 or MOV video an agent pins shows its first frame with a play button, and plays when you tap it. Anything over 10 MB, or from a thread that's been quiet for over two weeks, says it's on your Mac. To point one thread at another, use Copy Thread ID in its ... menu or the menu when you press and hold its row, and paste it into a message, here or on the Mac: it goes in as a link to that thread, with its title. When the Mac a thread runs on is asleep or offline, its message box says so, and what you send waits for it: each message shows faded with a Cancel under it until that Mac takes it, and Cancel puts its words back in the box. It can send notifications too,
+likely answers as buttons (type in the box to say something else; the one you tap spins until the runner has it, and the card comes back if it's refused), and
+a thread that's done offers its suggested next steps and Archive, which takes you back to the inbox as its row slides away. Hibernate from a thread's ... menu does the same, with its row sinking towards the Hibernating heading. Clear the last thread from the inbox and the bear waves at you, the once. Pull the inbox down and let go to reconnect to your Mac's mirror, if the list ever looks stuck. A new thread from the phone starts in your default folder; pick its model and effort under the message, or leave them on Default. With more than one runner it starts on the first one that's online in your order, so a sleeping Mac doesn't hold it up; pick another under Runner, or change the order in Settings > Runners > Change the order. The sheet closes as soon as you tap Start, and a row at the top of the inbox says Starting until that Mac has made the thread, which then opens. If it couldn't start, the row says why; tap it to open it again as you left it, photos and choices too. Paste a photo straight into any message box, or add one with the photo button: it goes in where the cursor is as a chip, "Picture 1", as on the Mac, and pictures in your messages show as chips too. Pictures an agent puts in its reply or pins show in the thread, and animated GIFs play; tap one to see it full screen and pinch to zoom. An MP4 or MOV video an agent pins shows its first frame with a play button, and plays when you tap it. Anything over 10 MB, or from a thread that's been quiet for over two weeks, says it's on your Mac. To point one thread at another, use Copy Thread ID in its ... menu or the menu when you press and hold its row, and paste it into a message, here or on the Mac: it goes in as a link to that thread, with its title. When the Mac a thread runs on is asleep or offline, its message box says so, and what you send waits for it: each message shows faded with a Cancel under it until that Mac takes it, and Cancel puts its words back in the box. It can send notifications too,
 though you don't need them for any of that. It pairs with your Mac by scanning a
 QR code: on the Mac, Settings (⌘,) > Phone & browser > Show the code, then
 scan it with the iPhone app. Keep the code to yourself: anyone who scans it
@@ -1370,6 +1388,48 @@ a thread you stopped yourself. Several threads finishing at once make one
 ding. Pick Chime, Bell or Droplet (each plays as you pick it), set the
 volume, and press Play to hear it again.
 
+### Talking with a thread
+
+This is an experiment, off until you turn it on (see Experiments): there's
+no button, no download and no microphone prompt while it's off.
+
+Press the waveform button beside Send to talk with the thread out loud.
+It's on a new thread's composer too: there, what you say first starts the
+thread, and you carry on talking in it.
+It turns red while Voice is on. Say what you want as you would to a
+person; when you pause for about a second it goes to the thread as your
+message, and the agent's reply is read out. You can keep talking while it
+works (what you say goes into the turn it's on, as typing does), and if
+you talk over it, it stops to listen. It's the same thread with the same
+memory, tools and approvals. When it needs your OK it asks out loud, and
+you can just say "yes", "go ahead", "no" or "always allow"; anything
+longer ("no, use the other folder") goes to it as your message, as
+typing would. Your answer only counts once it has finished reading the
+request out and stopped talking: if another one comes in first, or you
+answer before it's done, nothing is answered and it reads the newest one
+to you. It only takes an answer by voice for a request it can read out
+whole, a plain one-line command. Anything more (a longer command, an edit,
+a plan, another Mac asking to start a thread) it names and leaves for you
+to answer on screen, as you do question cards.
+While Voice is on, the bear sits over the message box with what you're
+saying beside it: it perks up while it listens, nods along as you talk,
+looks up with thought dots while it works, and talks along with its
+voice. Code and tables aren't read out; it
+tells you they're on screen. Press the button again, or go to another
+thread, to end Voice.
+
+Use Voice in Settings (⌘,) > Voice turns it off, which takes the
+waveform button away everywhere. The same tab picks who it sounds like (Emily, Mike and about
+twenty more), how fast it talks, the language, and the microphone. Play
+a Sample tries a voice. The first time you use Voice, Threadbear
+downloads its voice engine (Kyutai's pocket-tts) and a voice model of
+about 240 MB, and macOS asks to let it use the microphone. Listening is
+done on your Mac by macOS; nothing you say is recorded or kept in a log. On headphones
+(AirPods and the like) you can talk over it any time. On the Mac's
+speakers you can too, as long as macOS's echo cancellation starts; when
+it won't, Voice stops listening while it speaks, so it doesn't hear
+itself.
+
 ### The activity log
 
 Turn on Keep an activity log in Settings (⌘,) > General and the app notes
@@ -1426,6 +1486,8 @@ you turn it on, and it stays on your Mac.
 - `threadbear` in Terminal opens the app, and quitting it with ⌘Q is always
   safe, since your threads keep running without it. If the app says it
   can't reach the runner, click Start runner.
+- Threadbear > About Threadbear says which commit your copy was built from,
+  along with a few numbers about your threads.
 
 ## The tour and Finish setting up
 <!-- slug: finish-setting-up -->

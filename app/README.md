@@ -471,8 +471,11 @@ app has quit (another thread's once it has been quiet for 30 minutes).
 Tools/dev-app.sh start --mock                    # the demo threads; prints the instance id
 Tools/dev-app.sh start --mock --fixtures .fixtures/threads/<id>   # a tb export
 Tools/dev-app.sh start --home <dev runner home>  # runner/scripts/dev-runner.sh
+Tools/dev-app.sh start --mock --bear-date 2026-12-24T23:00   # the date the bear goes by: its Santa hat (1 to 26 December), bedtime under an empty Inbox
+TB_MOCK_NO_REMOTE=1 Tools/dev-app.sh start --mock --fixtures Tools/mock-runner/fixtures/demo-keep-awake   # archive that one and the inbox is empty: bruce's demo threads can't be
 Tools/dev-app.sh do '{"cmd":"open","id":"demo_upload"}' '{"cmd":"expand","row":"g:"}'
 Tools/dev-app.sh do '{"cmd":"collapse","highlightSection":"subagents"}'   # a Highlights heading; see HighlightFold
+Tools/dev-app.sh do '{"cmd":"point","settings":true,"x":200,"y":262,"toX":215,"toY":345,"holdMs":800}'   # real events in the Settings window; holdMs waits mid-drag for a `shot`
 Tools/dev-app.sh do '{"cmd":"click","tip":"Hide Links"}'   # presses a SwiftUI control by its tooltip, without moving the pointer
 Tools/dev-app.sh do '{"cmd":"error","text":"Thread not found"}'   # fills the error bar ({"cmd":"error"} clears it)
 Tools/dev-app.sh dump            # sidebar, rows (id, kind, height, open, text), panels, actions, composer, banner
@@ -528,8 +531,9 @@ is an error. Commands marked "the open thread" act on `id` when it's given
 | `select` | `id` | selects it without waiting |
 | `subagent` | `thread` (default: the open one), `id`, `timeout` | shows a sub-agent's transcript, as clicking its row under the thread does, and waits until its rows are on screen |
 | `menu-key` | `key` (a letter, or `down`, `up`, `left`, `right`), `modifiers` (`cmd`, `opt`, `ctrl`, `shift`) | a key equivalent through the main menu, as pressing it would; says whether an item took it, the open thread and any end-of-inbox note |
+| `click-at` | `x`, `y` | a click at a point in the main window, in points from its top left, without moving the pointer |
 | `mouse-button` | `button` (`back`, `forward`) | a mouse's side-button click over the window, through the same handler as a real one; says the sidebar view, the thread and whether back and forward can go further |
-| `page-swipe` | `dx`, `dy` (right and down positive; right is Back), `steps`, `down` (points from the window's top) | two fingers across the window, as synthetic trackpad events through SwipeNavigation's handler. Says whether the start was taken as a scroll or a page swipe and how far that got, how many events were held back while deciding, then where the window went |
+| `page-swipe` | `dx`, `dy` (right and down positive; right is Back), `steps`, `lift` (default true) | two fingers across the middle of the window, as synthetic trackpad events through the handler SwipeNavigation's monitor calls; `"lift": false` leaves the fingers down for a shot of the edge arrow. Says the way, how far along and whether it's past the line, then where the window went |
 | `realMenu` | `x`, `y` (window points from the top left; `right` to right-click) or `main` (a menu bar menu), `sub` | opens a real menu; `dev-app.sh menu <file.png> '<these as JSON>'` captures it, the only way to see its icons. It's up for a second over whatever's in front, so check `HIDIdleTime` first |
 | `new`, `options` | `cwd`, `account`, `model` (`null` for the default), `effort` (`null` for the model's own), `ask` | the new-thread composer and its menus; `options` refuses anything else (a typo used to pass) and says what's set now |
 | `composer-menu` | `menu` (`model`, `account`, `permission`, `folder`, `runner`, the new-thread composer's Runs on, or `context`, the context ring: its tokens and percent, `show` opens its popover; default `model`), `click` (an item's title; an account's email or id), `show` (opens the model or account picker and says its window number) | the composer chip's menu (or the model or account picker) for the open thread or a new one, as text: `[x]` the ticked item, `*` the default, the subtitle after a dash, submenus and older models indented, `#` on a section, `---` before the account picker's line about where the numbers came from; `click` picks an item as a click would |
@@ -649,3 +653,15 @@ streams) and text typed into the composer reaching the draft.
 - The model picker lists the CLI's own rows once the runner has asked each
   account (a few seconds after it starts); until then it offers opus, sonnet
   and haiku by name. The runner passes the row's id through to the CLI.
+
+### A real drag
+
+`point` hands events to a window kept behind everything, so it reaches AppKit
+controls, but a SwiftUI gesture ignores a window that isn't key (a `DragGesture`
+never fires, 7 Nov). For those, on Tinker Desk's desktop and never Mike's:
+`{"cmd":"settings","tab":"runners","front":true}` floats the Settings window
+on top and says its number and top left, and `Tools/realdrag.swift` (compile it
+with `swiftc`, run it through `desk`) posts a real drag. Click a blank part of
+the window with it first to make the window key. Look at the whole desktop
+once if nothing happens: other threads' windows and permission dialogs sit
+there, and a drag that misses lands in them.

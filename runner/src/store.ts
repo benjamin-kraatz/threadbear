@@ -98,6 +98,9 @@ export type ThreadRecord = {
   // bring a thread back needn't clear them.
   archivedBy?: ArchivedBy;
   archiveVerdict?: ArchiveVerdict;
+  // A schedule's message brought it out of the archive (Runner.sendTo), and
+  // who had archived it: a run that ends with nothing for Mike puts it back.
+  unarchivedBySchedule?: { by?: ArchivedBy };
   starredAt?: string; // Mike starred it: the Starred section, oldest star first
   preview: string;
   lastSeq: number;
@@ -148,6 +151,10 @@ export type ThreadRecord = {
   // The projects the native session has been told about (the brief, or a
   // line when it joined one), so it hears about each once.
   projectsTold?: string[];
+  // The hash of Mike's standing instructions the native session was last
+  // told, so it hears each change once; 'cleared' or 'rewound' (instructions.ts).
+  // Absent while it has never held any.
+  instructionsTold?: string;
   // Highlights (highlights.ts): what's been found and pinned, and the
   // event it had read up to. Brought up to date when a client asks.
   highlights?: HighlightState;

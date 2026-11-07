@@ -9,6 +9,8 @@ extension AppModel {
     // MARK: Thread actions
 
     func newThread() {
+        // Voice talks with the thread on screen: leaving it ends it.
+        if VoiceMode.shared.isOn, VoiceMode.shared.threadId != VoiceMode.newThread { VoiceMode.shared.stop() }
         selection = nil
         openProjectId = nil
         showsProjectsHome = false
@@ -288,6 +290,50 @@ extension AppModel {
                     // The draft never left the box.
                     show(error)
                 }
+            }
+        }
+    }
+
+    /// What Mike said in Voice mode, sent as his message without touching
+    /// whatever is typed in the composer (VoiceMode).
+    func sendSpoken(threadId: String, text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard let client = client(for: threadId), isRemote(threadId) || connection == .connected else {
+            showConnectionError(notConnectedText(threadId, "that wasn't sent"))
+            return
+        }
+        ActivityRecorder.shared.sent(threadId: threadId, images: 0, answers: 0)
+        post(threadId: threadId, text: text, images: [], answers: [], client: client)
+    }
+
+    /// Starts a new thread with what Mike said in Voice on the new-thread
+    /// composer, with its folder, login and model as the composer has
+    /// them. `then` gets its id before it's selected (so Voice carries on
+    /// in it), or nil if it couldn't be made.
+    func startThreadSpoken(_ text: String, then: @escaping (String?) -> Void) {
+        guard let client, connection == .connected, !creatingThread else { then(nil); return }
+        let account = newThreadAccountId
+        let request = newThreadRequest(text: text, images: [])
+        creatingThread = true
+        Task {
+            defer { creatingThread = false }
+            do {
+                let thread = try await client.createThread(request)
+                // What the new-thread composer's picks were for, as for a
+                // typed first message (send): the next one starts afresh.
+                rememberLastAccount(request.poolId == nil ? account : thread.accountId)
+                newThreadCwd = nil
+                newThreadPermission = .full
+                newThreadAccount = nil
+                newThreadPool = nil
+                newThreadProvider = nil
+                threads[thread.id] = thread
+                then(thread.id)
+                select(thread.id)
+            } catch {
+                then(nil)
+                show(error)
             }
         }
     }
@@ -582,9 +628,16 @@ extension AppModel {
         if let thread = threads[threadId] {
             archivedNote = ArchivedNote(threadId: threadId, title: thread.title, wasOpen: selection == threadId)
             inboxEndNote = nil
+            milestoneNote = nil
         }
         if selection == threadId {
+            // The last thread left: the inbox is clear, and the pane goes
+            // to the new thread page.
+            let sections = sections
+            let clears = next == nil && ![sections.inbox, sections.running, sections.needsYou].joined().contains { $0.id != threadId }
+            if clears { inboxZeroBear = .due }
             flyToArchive(threadId)
+            if clears, !flyingToArchive.contains(threadId) { inboxZeroBear = .shown }
             select(next)
         }
         if slid { return update(threadId, ThreadUpdate(archived: true)) }
@@ -645,11 +698,40 @@ extension AppModel {
     /// thread open in a panel of its own.
     private func flyToArchive(_ threadId: String) {
         guard transcript.session?.threadId == threadId, transcript.session?.subagentId == nil else { return }
+        noteFlightLeaving(threadId)
         let started = ArchiveFlight.launch(from: transcript.scrollView) { [weak self] in
             self?.flyingToArchive.remove(threadId)
+            self?.leavingTheInbox.remove(threadId)
             self?.archiveLandings &+= 1
+            if self?.inboxZeroBear == .due { self?.inboxZeroBear = .shown }
         }
-        if started { flyingToArchive.insert(threadId) }
+        if started { flyingToArchive.insert(threadId) } else { leavingTheInbox.remove(threadId) }
+    }
+
+    /// The open thread's panel sinks into the Hibernating heading's moon
+    /// while the next thread fades in under it (`ArchiveFlight`). Call it
+    /// before the thread changes and the next one opens, as it pictures the
+    /// transcript as it is. A row hibernated without being open just leaves,
+    /// but the moon still stirs, so the eye knows where it went. A starred
+    /// thread stays in Starred however long it sleeps, so it has nowhere to
+    /// fly to: the panel changes over as it always did.
+    private func tuckIn(_ threadId: String) {
+        guard let thread = threads[threadId], !thread.isStarred, !thread.isArchived else { return }
+        let showing = selection == threadId && transcript.session?.threadId == threadId && transcript.session?.subagentId == nil
+        // Asked before it goes. A thread already asleep (hibernated again, or
+        // waiting on a schedule) counts: its heading is there and stays.
+        let headingThere = !flyingToHibernate.isEmpty || !sections.hibernating.isEmpty
+        if showing { noteFlightLeaving(threadId) }
+        let started = showing && ArchiveFlight.launch(from: transcript.scrollView, to: .hibernate, headingThere: headingThere) { [weak self] in
+            self?.flyingToHibernate.remove(threadId)
+            self?.leavingTheInbox.remove(threadId)
+            self?.moonStirs()
+        }
+        if started { flyingToHibernate.insert(threadId) } else { leavingTheInbox.remove(threadId); moonStirs() }
+    }
+
+    private func moonStirs() {
+        if !Juice.reduceMotion { hibernateLandings &+= 1 }
     }
 
     /// As long as a swiped row takes to leave (`RowSwipeController`).
@@ -680,6 +762,7 @@ extension AppModel {
     func snooze(_ threadId: String? = nil, until date: Date) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
+        tuckIn(threadId)
         update(threadId, ThreadUpdate(snoozedUntil: .some(date)))
         if selection == threadId { select(next) }
     }
@@ -693,6 +776,7 @@ extension AppModel {
         let next = neighbour(of: threadId)
         let before = threads[threadId]
         let guess = before?.hibernating(said: said)
+        tuckIn(threadId)
         if let guess { threads[threadId] = guess }
         if selection == threadId { select(next) }
         Task {
@@ -712,6 +796,7 @@ extension AppModel {
     func snoozeUntilRestart(_ threadId: String? = nil) {
         guard let threadId = threadId ?? selection else { return }
         let next = neighbour(of: threadId)
+        tuckIn(threadId)
         update(threadId, ThreadUpdate(snoozeUntilRestart: true))
         if selection == threadId { select(next) }
     }

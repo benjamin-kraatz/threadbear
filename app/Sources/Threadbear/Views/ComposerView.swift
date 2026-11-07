@@ -29,6 +29,8 @@ struct ComposerView: View {
     static var padding: CGFloat { zoomed(14) }
 
     private var draftKey: String { thread?.id ?? "new" }
+    /// Messages sent from this box, for the send arrow's nudge.
+    @State private var sends = 0
 
     var body: some View {
         // Normalized, so a picture added from outside the box (an ask's
@@ -41,7 +43,7 @@ struct ComposerView: View {
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         // So are follow-ups ticked on a done card.
         let followUps = thread.map { app.pickedFollowUps(threadId: $0.id) } ?? FollowUpPicks()
-        let canSend = !picks.isEmpty || !followUps.isEmpty || ComposerChips.canSend(text: draft.wrappedValue.text, imageCount: draft.wrappedValue.images.count)
+        let canSend = Self.canSend(draft.wrappedValue, picks: picks, followUps: followUps)
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
         let creating = thread == nil && app.creatingThread
@@ -53,6 +55,10 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: 0) {
         if let thread {
             RefusalOffer(thread: thread)
+        }
+        // Voice mode's bear, over the box while it's on for this thread.
+        if VoiceMode.shared.isOn(for: thread?.id ?? VoiceMode.newThread) {
+            VoiceStage(threadId: thread?.id ?? VoiceMode.newThread)
         }
         // The folder's actions (patches), on shelves sitting on the box's
         // top edge, in from its rounded corner (ActionChips).
@@ -112,6 +118,7 @@ struct ComposerView: View {
                 onSend: { send() },
                 onSchedule: { app.newSchedule(from: thread, draftKey: draftKey) }
             )
+            .environment(\.sendNudges, sends)
         }
         .padding(Self.padding)
         }
@@ -168,6 +175,10 @@ struct ComposerView: View {
             .fill(dark ? Color.primary.opacity(0.085) : Color.white)
             .shadow(color: .black.opacity(dark ? 0 : 0.08), radius: zoomed(14), y: zoomed(4))
             .overlay(shape.strokeBorder(attention ? Color(nsColor: .controlAccentColor) : Color(nsColor: .separatorColor), lineWidth: attention ? 1 : 0.5))
+            // Fades up with a card settling in, rather than snapping on. Not
+            // going to a thread that's waiting already: this box is reused
+            // from thread to thread, and those change over at once.
+            .animation(session?.arrivingCard != nil ? .easeOut(duration: 0.2) : nil, value: attention)
             .contentShape(shape)
             .onTapGesture { app.focusComposer(draftKey) }
     }
@@ -274,7 +285,17 @@ struct ComposerView: View {
     /// AppModel empties the box, and puts the draft back if it isn't sent.
     /// Picked answers go with it.
     private func send() {
+        // Return in an empty box comes here too, with nothing to go.
+        if Self.canSend((app.drafts[draftKey] ?? Draft()).normalized,
+                        picks: thread.map { app.picks(for: $0) } ?? [:],
+                        followUps: thread.map { app.pickedFollowUps(threadId: $0.id) } ?? FollowUpPicks()) {
+            sends &+= 1
+        }
         app.send(threadId: thread?.id)
+    }
+
+    private static func canSend(_ draft: Draft, picks: [Int: Int], followUps: FollowUpPicks) -> Bool {
+        !picks.isEmpty || !followUps.isEmpty || ComposerChips.canSend(text: draft.text, imageCount: draft.images.count)
     }
 
     /// Return with nothing typed sends picked answers on their own (once

@@ -64,6 +64,9 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
     /// The box drops on this transcript go to (ComposerDropView).
     weak var composerHandle: ComposerHandle?
     private(set) weak var session: ThreadSession?
+    /// The last message that rose: a batch that moves it doesn't lift it
+    /// again, and the real row that replaces it carries on from here.
+    private var lifting: (rowId: String, text: String, begun: CFTimeInterval)?
     private(set) var width: CGFloat = 0
     private var deferred = Set<String>()
     private var deferredTimer: Timer?
@@ -323,6 +326,15 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
 
+    func claimWakeUp(rowId: String) -> Bool {
+        guard let session, session.wakeUpPending else { return false }
+        // An older thread's older wake note can come on screen first.
+        let newest = (0..<session.displayCount).reversed().lazy.map { session.displayRow($0) }.first { $0.content.isWakeNote }
+        guard newest?.id == rowId else { return false }
+        session.wakeUpPending = false
+        return true
+    }
+
     func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) {
         for case let cell as RowCellView in rowView.subviews { cell.releaseContent() }
     }
@@ -429,6 +441,34 @@ final class TranscriptController: NSObject, NSTableViewDataSource, NSTableViewDe
             // Rows above the anchor can change height (a tool result landing);
             // keep what the user is reading where it was.
             scroll(toRow: index, offset: anchor.offset)
+        }
+        if wasPinned { liftSent(inserted) }
+    }
+
+    /// A message Mike's just sent rises the last of the way from the
+    /// composer's edge (`SendLift`), rather than appearing above it. Only
+    /// when the table was at the bottom, where it's seen and where it isn't
+    /// about to be scrolled to. Goes on the cell's layer once, so the render
+    /// server runs it, and never touches the scroll: that's already pinned.
+    ///
+    /// A runner that answers quickly replaces the faded row with the real
+    /// one while it's still rising, often in the same frame, in a cell of
+    /// its own. That cell picks the rise up from where it had got to, or a
+    /// quick runner would mean no lift at all.
+    private func liftSent(_ inserted: IndexSet) {
+        for index in inserted {
+            guard let row = row(at: index), case .user(let message) = row.content else { continue }
+            let begun: CFTimeInterval?
+            if SendLift.rises(row), row.id != lifting?.rowId {
+                begun = nil
+                lifting = (row.id, message.text, CACurrentMediaTime())
+            } else if message.pending == nil, let lifting, lifting.text == message.text, CACurrentMediaTime() - lifting.begun < SendLift.firstFrame + SendLift.duration {
+                begun = lifting.begun
+            } else {
+                continue
+            }
+            guard let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: true) else { continue }
+            SendLift.lift(cell, begun: begun)
         }
     }
 

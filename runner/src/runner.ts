@@ -2,6 +2,8 @@
 // release and snoozes. Providers plug in through AgentAdapter; the WebSocket
 // server in rpc.ts is a thin layer over the public methods here.
 import { RELEASE } from './release.ts';
+import type { UserInput } from './adapters/types.ts';
+import { INSTRUCTIONS_CLEARED, INSTRUCTIONS_REWOUND } from './instructions.ts';
 import { reachable, type Reachable } from './net-probe.ts';
 import type { UpstreamStatus } from './upstream.ts';
 import fs from 'node:fs';
@@ -78,6 +80,7 @@ import { cleanUpWorktree, makeWorktree, sameSubfolder, worktreeInstructions } fr
 import { stripModelSuffix, type AccountRegistry, type LearnedAccountInfo } from './accounts.ts';
 import { pickAccount as pickByRoom, resetTime, type UsageReading } from './usage.ts';
 import { DEFAULT_POOL_FOLDERS, RUNNER_VERSION, expandHome, paths, readRunnerJson, writeRunnerJson, type Config } from './config.ts';
+import { experimentsOn } from './experiments.ts';
 import { WAIT_SLACK_MS, blockedUntil, limitWhy, loginOk, nextLogin, pickInPool, poolAccounts, poolForFolder, poolProviders, readPools, roomWait, validatePools } from './pools.ts';
 import { copyImageInto, imageRefFor } from './media.ts';
 import { isDirectory } from './fsutil.ts';
@@ -161,6 +164,7 @@ export type Notification =
   | { method: 'remoteThreads.updated'; params: import('./thread-index.ts').RemoteThreads }
   | { method: 'clis.updated'; params: { clis: CliStatus[] } }
   | { method: 'settings.updated'; params: { settings: Settings } }
+  | { method: 'instructions.updated'; params: { instructions: import('./instructions.ts').StandingInstructions } }
   | { method: 'runner.updates'; params: { updates: RunnerUpdates } }
   | { method: 'projects.updated'; params: { projects: Project[] } }
   | { method: 'librarian.updated'; params: { librarian: LibrarianStatus } }
@@ -244,8 +248,9 @@ export type PendingApproval =
   // macOnly: its whole input doesn't fit what the phone or another Mac's
   // view shows (tools.ts, remoteCardShowsAll), so only an allow from a
   // client that shows it all counts.
-  | { approvalId: string; kind: 'tool'; main: boolean; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
-  | { approvalId: string; kind: 'question'; main: boolean; questions: Question[]; resolve: (a: QuestionAnswer) => void }
+  // title: what it's asking, for telling the agent about a subagent's.
+  | { approvalId: string; kind: 'tool'; main: boolean; title?: string; plan?: string; macOnly?: boolean; resolve: (a: ToolApprovalAnswer) => void }
+  | { approvalId: string; kind: 'question'; main: boolean; title?: string; questions: Question[]; resolve: (a: QuestionAnswer) => void }
   // An agent's ask_secret (docs/protocol.md, "Secrets"). The value never
   // passes through here: secrets.answer writes the file and hands this the
   // paths.
@@ -345,6 +350,8 @@ type Runtime = {
   releasedGen?: number; // generation of the session being released on purpose
   resumed: boolean; // the live session was started with resume
   retriedFresh: boolean;
+  // News of the standing instructions went out in this turn (settleInstructionsNews).
+  instructionsNewsSent?: boolean;
   // Where the live session's transcript was carried from, if it moved
   // folder; used only if resuming the copy fails.
   carried?: ThreadRecord['handoff'];
@@ -518,6 +525,8 @@ export type RunnerDeps = {
   // Projects (projects.ts): their folders' patches, the brief a session
   // starts with, and the summary's `projects`. Started by start().
   projects?: Projects;
+  /** Mike's standing instructions for every session (instructions.ts); '' for none. */
+  standingInstructions?: () => string;
   // A completed turn asked Mike to Restart to Update, by end_turn or in its
   // closing "What I need from you" (app-restarts.ts signs the thread up).
   appRestartAsked?: (threadId: string) => void;
@@ -616,6 +625,7 @@ export class Runner {
   secrets: SecretStore;
   models?: Pick<Models, 'generate'>;
   projects?: Projects;
+  standingInstructions?: () => string;
   activity = new Set<(a: ThreadActivity) => void>();
   patchCache: PatchCache = new Map();
   patchTrust: PatchTrustStore;
@@ -696,6 +706,7 @@ export class Runner {
     this.secrets = new SecretStore(paths.secrets(deps.config.home), () => this.clock.now());
     this.models = deps.models;
     this.projects = deps.projects;
+    this.standingInstructions = deps.standingInstructions;
     this.appRestartAsked = deps.appRestartAsked;
     this.atMac = deps.atMac;
     this.adapters = deps.adapters;
@@ -924,14 +935,27 @@ export class Runner {
     const { rec } = st;
     // A sub-agent can't outlive the runner that started its CLI.
     this.stopSubagents(st);
+    // Waiting with no turn is only a subagent's card, and that subagent is
+    // gone: there's no turn to pick up again.
+    const onlyCards = rec.status === 'waiting' && !rec.turnId;
+    if (onlyCards) rec.status = 'idle';
     const midTurn = rec.status === 'starting' || rec.status === 'running' || rec.status === 'waiting';
     if (!midTurn && rec.pendingApprovals.length === 0 && rec.queue.length === 0) return false;
     // The turn may have ended on disk just before a crash stopped
     // thread.json being saved; then it only needs its status back.
     const ended = midTurn && rec.turnId ? this.findTurnCompleted(rec.id, rec.turnId) : undefined;
+    // thread.json can be behind the log (a crash before it was saved): a card
+    // may have been answered there, and a later "expired" would replace the
+    // answer. A turn that ended there closed its own cards, but a subagent's
+    // outlives its turn, so go by what the log says (Codex review).
+    const resolved = new Set<string>();
+    if (rec.pendingApprovals.length) {
+      const log = this.store.log(rec.id);
+      for (const e of log.read(1, log.lastSeq)) if (e.type === 'approval.resolved') resolved.add(e.approvalId);
+    }
     for (const approvalId of rec.pendingApprovals) {
-      if (ended) break;
-      this.emit(st, { type: 'approval.resolved', approvalId, decision: 'expired', message: 'The runner restarted.' }, rec.turnId);
+      if (resolved.has(approvalId)) continue;
+      this.emit(st, { type: 'approval.resolved', approvalId, decision: 'expired', message: 'The runner restarted.' }, ended ? undefined : rec.turnId);
     }
     rec.pendingApprovals = [];
     if (midTurn && ended) {
@@ -1152,7 +1176,7 @@ export class Runner {
 
   // --------------------------------------------------------------- queries
 
-  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; pools: Pool[]; defaults: RunnerDefaults; clis?: CliStatus[] } {
+  hello(): { runnerVersion: string; protocol: number; accounts: Account[]; pools: Pool[]; defaults: RunnerDefaults; clis?: CliStatus[]; experiments?: string[] } {
     const accounts = this.accounts.list();
     const pools = this.pools(accounts);
     const defaults: RunnerDefaults = { cwd: this.cfg.defaults.cwd, accountId: this.defaultAccountId(accounts) };
@@ -1163,7 +1187,8 @@ export class Runner {
     if (claudeModel) defaults.model = claudeModel;
     if (this.cfg.defaults.models) defaults.models = { ...this.cfg.defaults.models };
     if (this.cfg.defaults.efforts) defaults.efforts = { ...this.cfg.defaults.efforts };
-    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, pools, defaults };
+    // Experiments on here, for the ones that live in the app (Voice mode).
+    const out: ReturnType<Runner['hello']> = { runnerVersion: RUNNER_VERSION, protocol: PROTOCOL_VERSION, accounts, pools, defaults, experiments: experimentsOn(this.cfg.home) };
     const clis = this.cliList();
     if (clis) out.clis = clis;
     return out;
@@ -1367,7 +1392,11 @@ export class Runner {
     // New work: its last finish no longer says it's done, for threads
     // waiting on it (runner/hibernation.ts).
     delete rec.finished;
-    // Sending to a snoozed or archived thread brings it back.
+    // Sending to a snoozed or archived thread brings it back. A schedule's
+    // message notes it came out of the archive, so the run can put it back
+    // if it ends with nothing for Mike (the end of the turn, below).
+    if (rec.archivedAt && opts.origin === 'schedule') rec.unarchivedBySchedule = { by: rec.archivedBy };
+    if (fromMike(text, opts)) delete rec.unarchivedBySchedule;
     if (rec.snoozedUntil || rec.archivedAt) {
       delete rec.snoozedUntil;
       delete rec.snoozedUntilRestart;
@@ -1454,8 +1483,8 @@ export class Runner {
   // CLI is still starting or leaving, not behind messages already waiting,
   // not once a move or a fresh CLI is due on the next turn (the message is
   // meant for that), not after Stop was pressed (the CLI would cancel it
-  // with the rest), and not into a turn opened only for a background
-  // subagent's approval, where there's no CLI turn to join.
+  // with the rest), and not into a turn opened only for a card, where
+  // there's no CLI turn to join.
   canSteer(st: ThreadState): boolean {
     const { rec, rt } = st;
     const turn = rt.turn;
@@ -1498,7 +1527,9 @@ export class Runner {
     // more thing" shouldn't send the thread away. It can ask again.
     if (turn.endTurn?.archive) turn.endTurn = { ...turn.endTurn, archive: false };
     this.markDirty(st);
-    rt.session!.send({ id: msg.turnId, text: this.forAgent(msg), images: msg.images });
+    // A change reaches a running turn too, or a clear could wait out as many
+    // messages as were sent into it (Codex review).
+    this.sendWithInstructionsNews(st, { id: msg.turnId, text: this.forAgent(msg), images: msg.images });
   }
 
   // A turn that had its end_turn, opened again once the agent has read a
@@ -1567,7 +1598,8 @@ export class Runner {
     delete rec.waitingForNetwork;
     if (rec.netCarryOn && rec.netCarryOn.turnId !== msg.turnId) delete rec.netCarryOn;
     this.beforeTurn(st);
-    rec.status = rt.session && !rt.closing ? 'running' : 'starting';
+    // A subagent's card can still be open (docs/protocol.md, "A subagent's card").
+    rec.status = rt.session && !rt.closing ? (rt.approvals.size ? 'waiting' : 'running') : 'starting';
     this.markDirty(st);
     // A message to the thread (not a turn the CLI opened by itself), so the
     // librarian can file a new thread before its first turn is over.
@@ -1608,6 +1640,9 @@ export class Runner {
     // (its next init), but says nothing.
     if (command && rec.provider === 'claude' && /^\/clear\b/i.test(msg.text.trim())) {
       this.emit(st, { type: 'system.note', text: 'Cleared the conversation. The agent starts fresh from your next message; the transcript above stays here for you.' }, msg.turnId);
+      // The same CLI goes on with the system prompt it started with, and
+      // whatever a message told it has gone (Codex review).
+      if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
     }
     if (!rt.session && rec.worktreePending) {
       await this.prepareWorktree(st, msg.turnId);
@@ -1660,7 +1695,9 @@ export class Runner {
       this.emit(st, { type: 'system.note', text: `Moved to ${rec.cwd}. The session carries on there.` }, msg.turnId);
       delete rec.moved;
     }
-    rt.session!.send({ id: msg.turnId, text, images: msg.images });
+    // Kept for the next message when this one is a command, as the news is.
+    if (command) rt.session!.send({ id: msg.turnId, text, images: msg.images });
+    else this.sendWithInstructionsNews(st, { id: msg.turnId, text, images: msg.images });
     if (msg.reviewId && !rec.reviewDeliveries?.includes(msg.reviewId)) {
       (rec.reviewDeliveries ??= []).push(msg.reviewId);
       // A persisted transcript row is not proof of dispatch: both initial
@@ -2122,9 +2159,14 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
+    this.settleInstructionsNews(st, r.outcome === 'completed' && !turn.interruptRequested);
     this.flushDeltas(st);
     rt.inProgress.clear();
-    this.expireApprovals(st, 'The turn ended.');
+    // Not a subagent's card: it's waiting on Mike, not on this turn, and the
+    // subagent carries on after it. Expiring them here killed two subagents
+    // when their parent's next turn ended, while Mike was away, and the CLI
+    // told the parent he had stopped them (7 Nov 2026, thread 7a98a6fd).
+    this.expireApprovals(st, 'The turn ended.', { mainOnly: true });
     let turnCost: number | undefined;
     if (r.totalCostUsd !== undefined) {
       // total_cost_usd is a running total for the native session (resume
@@ -2203,7 +2245,7 @@ export class Runner {
     // Judged before endTurn, which starts any queued message.
     const finished = outcome === 'completed' && said?.needs === 'nothing' && !rec.queue.length && !archive &&
       !snoozeFromTool(turn.endTurn) && !waitForFromTool(turn.endTurn) &&
-      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length &&
+      !rec.subagents?.some((a) => a.status === 'running') && !rt.tasks.length && !rt.approvals.size &&
       // A job that ended mid-turn: the CLI's turn reading its result is next.
       !rt.taskEndedInTurn && !rt.finished.length;
     this.endTurn(st, ev.seq, outcome === 'failed' ? 'error' : 'idle', outcome, limitHit, netLost);
@@ -2231,6 +2273,28 @@ export class Runner {
     // Owed to the next runner (a handover): finished once it's reviewed.
     else if (finished && !rec.labReviewOwed) this.markFinished(st, turn.lastText);
     if (outcome === 'completed' && this.waitedOnFor(rec.id).length) this.tellActivity({ kind: 'waited-on', threadId: rec.id });
+    // A schedule's message brought this thread out of the archive (sendTo).
+    // A run that finishes with nothing for Mike puts it back, so a watcher he
+    // archived doesn't land in his inbox each time it looks and finds
+    // nothing (7 Nov 2026, a twice-daily Pebble check). One that needs him,
+    // fails or is stopped stays out. One still going (a background job, a
+    // sub-agent, a lab review, owed or started, a wait, a pool move or a lost
+    // network) keeps the mark, so the turn that really ends the run decides;
+    // a queued message decides at the end of its own turn.
+    // A run that ends for good drops the mark even with another message
+    // queued (endTurn may have started it already), so a later run that
+    // finds nothing can't archive a question this one left for Mike.
+    if (rec.unarchivedBySchedule) {
+      const by = rec.unarchivedBySchedule.by;
+      const goingOn = !!limitHit || !!netLost || (outcome === 'completed' && said?.needs === 'nothing');
+      if (!goingOn || rec.archivedAt) delete rec.unarchivedBySchedule;
+      else if (!rec.queue.length && !rt.turn && finished && !review && !rec.labReviewOwed && !this.stopping) {
+        delete rec.unarchivedBySchedule;
+        this.emit(st, { type: 'system.note', text: 'Back in the archive: the scheduled run ended with nothing for you.' });
+        this.update({ threadId: rec.id, archived: true, archivedBy: by ?? 'threadbear' });
+      }
+      this.markDirty(st);
+    }
     if (archive && !rt.turn && !rec.archivedAt && !this.stopping) {
       this.emit(st, { type: 'system.note', text: 'Archived, as the agent was asked to once it had finished.' });
       this.update({ threadId: rec.id, archived: true, archivedBy: 'agent' });
@@ -2296,7 +2360,9 @@ export class Runner {
     rt.activeAt = this.clock.now();
     rec.turnId = undefined;
     rec.lastTurnCompletedSeq = completedSeq;
-    rec.status = status;
+    // A subagent's card outlives the turn (completeTurn), so the thread is
+    // still waiting on Mike.
+    rec.status = rt.approvals.size ? 'waiting' : status;
     rec.lastActivityAt = this.isoNow();
     this.markDirty(st);
     const waiters = rt.turnEndWaiters ?? [];
@@ -2310,8 +2376,13 @@ export class Runner {
     const { rec, rt } = st;
     const turn = rt.turn;
     if (!turn) return;
+    this.settleInstructionsNews(st, false);
     this.persistInProgress(st, turn.turnId);
     this.expireApprovals(st, 'The turn ended.');
+    // A crash or a Stop ends a scheduled run for good: it stays in the
+    // inbox, and a later run can't put it back in the archive (the end of
+    // a turn, above).
+    if (rec.unarchivedBySchedule) delete rec.unarchivedBySchedule;
     const interrupted = turn.interruptRequested;
     if (!interrupted) this.emit(st, { type: 'error', message }, turn.turnId);
     const body: EventBody = {
@@ -2372,6 +2443,9 @@ export class Runner {
     if (err && !rt.started && !missing && rt.releasedGen !== gen) this.tellStarted(rec.provider, rt.startVersion, false);
     rt.session = undefined;
     rt.frozen = false;
+    // Nothing's left to answer them: a subagent's card can be open with no
+    // turn running, and no turn ending would close it.
+    this.expireApprovals(st, 'The CLI stopped.');
     rt.tasks = [];
     rt.finished = [];
     rt.taskEndedInTurn = false;
@@ -2408,8 +2482,11 @@ export class Runner {
       const inUse = Boolean(err && !rt.resumed && /Session ID \S+ is already in use/i.test(err.message));
       if (((notFound && rt.resumed) || inUse) && !rt.retriedFresh) {
         rt.retriedFresh = true;
-        if (inUse) rec.sessionUsed = true;
-        else {
+        if (inUse) {
+          rec.sessionUsed = true;
+          // The old session goes on, not the fresh one the brief was for.
+          if (rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+        } else {
           rec.sessionUsed = false;
           rec.nativeSessionId = crypto.randomUUID();
           rec.sessionCostTotal = 0;
@@ -2457,13 +2534,21 @@ export class Runner {
     this.archiveWhenGone(st);
   }
 
-  interrupt(threadId: string): Record<string, never> {
+  // byMike: his Stop, in the app or on the phone. Everything else that stops
+  // a turn (an agent's interrupt_thread, an archive, a move) mustn't reach
+  // the agent as his decision (docs/protocol.md, "Who stopped it").
+  interrupt(threadId: string, opts: { byMike?: boolean } = {}): Record<string, never> {
     const st = this.mustGet(threadId);
     const { rt } = st;
     const turn = rt.turn;
-    if (!turn) return {};
+    const closing = { stopped: opts.byMike === true };
+    // Stop with only a subagent's card open: that card is what's waiting.
+    if (!turn) {
+      this.expireApprovals(st, 'Interrupted.', closing);
+      return {};
+    }
     turn.interruptRequested = true;
-    this.expireApprovals(st, 'Interrupted.');
+    this.expireApprovals(st, 'Interrupted.', closing);
     const session = rt.session;
     // Nothing is running in the CLI for a turn that was only opened for a
     // background subagent's approval, so nothing would end it.
@@ -2716,6 +2801,9 @@ export class Runner {
     }
     let archiving = false;
     if (params.archived !== undefined) {
+      // Mike (or an agent) archived or unarchived it himself: that settles
+      // where it lives, not the schedule run that brought it back.
+      delete rec.unarchivedBySchedule;
       if (params.archived) {
         archiving = !rec.archivedAt;
         const by = params.archivedBy ?? 'mike';
@@ -2755,6 +2843,7 @@ export class Runner {
     // first, then released, so that can take a moment. Resuming unarchives.
     if (archiving) {
       rt.archivePending = true;
+      if (rec.worktree && !rec.worktree.removedAt) rec.worktree.cleanupOwed = true;
       this.archiveWhenGone(st);
     }
     rec.updatedAt = this.isoNow();
@@ -2857,10 +2946,15 @@ export class Runner {
   // ------------------------------------------------------------ CLI updates
 
   // Runs a pending archive once no CLI has the session: none live and none
-  // closing. Skipped if the thread came back meanwhile.
+  // closing. Skipped if the thread came back meanwhile. A turn-end hook still
+  // running holds it too (runHooks comes back here): it's working in the
+  // folder the cleanup would remove or hand on, and on 7 Nov a typecheck
+  // lost its files that way, "failed", and woke the thread just archived.
+  // Waiting also means a real failure finds the worktree still there, as
+  // sendTo brings the thread back before the cleanup looks.
   archiveWhenGone(st: ThreadState): void {
     const { rec, rt } = st;
-    if (!rt.archivePending || rt.session || rt.closing || rt.deleted) return;
+    if (!rt.archivePending || rt.session || rt.closing || rt.deleted || rt.hooksRunning) return;
     rt.archivePending = false;
     if (rec.archivedAt) {
       this.archiveNative(st);
@@ -3209,6 +3303,16 @@ export class Runner {
   briefFor(rec: ThreadRecord, resume: boolean): { instructions?: string } {
     if (resume) return {};
     const parts: string[] = [];
+    // Mike's own standing instructions first: they're for everything.
+    const standing = this.standingInstructions?.().trim() ?? '';
+    if (standing) {
+      rec.instructionsTold = instructionsHash(standing);
+      parts.push(standingText(standing));
+    } else if (rec.instructionsTold !== undefined) {
+      // Not forgotten: a session id already in use goes back to the session
+      // that held them (below, inUse). With none ever, nothing's written.
+      rec.instructionsTold = INSTRUCTIONS_CLEARED;
+    }
     if (this.projects) {
       rec.projectsTold = this.projects.briefIds(rec);
       const brief = this.projects.brief(rec);
@@ -3217,6 +3321,62 @@ export class Runner {
     // Where its worktree is and how its work gets to main.
     if (rec.worktree && !rec.worktree.removedAt) parts.push(worktreeInstructions(rec.worktree));
     return parts.length ? { instructions: parts.join('\n\n') } : {};
+  }
+
+  // Mike's standing instructions, when they've changed since the session
+  // last heard them (or it never has): a resumed Claude session keeps its
+  // first system prompt, so the change comes before his next message.
+  instructionsNews(rec: ThreadRecord): string | undefined {
+    if (!this.standingInstructions) return undefined;
+    const standing = this.standingInstructions().trim();
+    const before = rec.instructionsTold;
+    if (!standing) {
+      // Nothing written while it never held any: with the experiment off a
+      // thread record doesn't change at all.
+      if (before === undefined || before === INSTRUCTIONS_CLEARED) return undefined;
+      rec.instructionsTold = INSTRUCTIONS_CLEARED;
+      return 'Note from Threadbear: the user cleared their standing instructions; earlier ones no longer apply.';
+    }
+    const hash = instructionsHash(standing);
+    if (before === hash) return undefined;
+    rec.instructionsTold = hash;
+    return `Note from Threadbear: the user's standing instructions${before === undefined || before === INSTRUCTIONS_CLEARED ? '' : ' have changed, and replace any earlier ones'}.\n\n${standingText(standing)}`;
+  }
+
+  // Sends a message with any change to the standing instructions in front.
+  // They count as told only once the CLI has taken it: a send that throws
+  // (a picture gone from the queue) would otherwise use up a clear that never
+  // arrived (Codex review). In the transcript too, as a change anything made
+  // reaches every thread, so it shouldn't only be something agents can see.
+  sendWithInstructionsNews(st: ThreadState, message: UserInput): void {
+    const { rec, rt } = st;
+    const before = rec.instructionsTold;
+    const standing = this.instructionsNews(rec);
+    try {
+      rt.session!.send(standing ? { ...message, text: `${standing}\n\n${message.text}` } : message);
+    } catch (e) {
+      if (before === undefined) delete rec.instructionsTold;
+      else rec.instructionsTold = before;
+      throw e;
+    }
+    if (!standing) return;
+    // A turn that ends any other way may have dropped it (a message Codex was
+    // still holding when Stop came), so the turn's end looks at this.
+    rt.instructionsNewsSent = true;
+    // Only a note: failing here would report a message the CLI has as lost.
+    try {
+      this.emit(st, { type: 'system.note', text: "Told this thread's agent about a change to your standing instructions." }, message.id);
+    } catch (e) {
+      this.log.warn('could not note the standing instructions change', { threadId: rec.id, error: String(e) });
+    }
+  }
+
+  // At a turn's end: news sent in a turn that didn't complete may never have
+  // arrived, so the next message says what's current.
+  settleInstructionsNews(st: ThreadState, completed: boolean): void {
+    const { rec, rt } = st;
+    if (rt.instructionsNewsSent && !completed && rec.instructionsTold !== undefined) rec.instructionsTold = INSTRUCTIONS_REWOUND;
+    rt.instructionsNewsSent = false;
   }
 
   // The thread's projects its session hasn't been told about, as lines to
@@ -3558,4 +3718,13 @@ function openInBrowser(url: string): Promise<void> {
 const ACCESS_ORDER: PermissionMode[] = ['ask', 'auto', 'full'];
 function moreAccess(a: PermissionMode | undefined, b: PermissionMode): PermissionMode {
   return a && ACCESS_ORDER.indexOf(a) > ACCESS_ORDER.indexOf(b) ? a : b;
+}
+
+// Mike's standing instructions as an agent is given them.
+function standingText(text: string): string {
+  return `The user's standing instructions (set in Threadbear, Settings > General, the only place they can change: writing the file does nothing). Keep them in mind in everything you do for them:\n\n${text}`;
+}
+
+function instructionsHash(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
