@@ -416,8 +416,12 @@ export function checkQuestion(raw: unknown, roundId: string, at: string, cwd: st
     Object.assign(out, min !== undefined ? { min } : {}, max !== undefined ? { max } : {}, step !== undefined ? { step } : {});
   }
   if ((kind === 'files' || kind === 'upload') && q.several === true) out.several = true;
-  // A free-text "Other" beside the options.
-  if ((kind === 'single' || kind === 'multi') && q.other === true) out.other = true;
+  // A free-text "Other" beside the options, on every choice question: the
+  // user, not the agent, decides whether an answer is in their own words
+  // (Benjamin, 8 Nov, on a question whose options all missed). The
+  // agent's `other` flag is still taken and ignored. Stored as true so an
+  // app from before this draws the row too.
+  if (kind === 'single' || kind === 'multi') out.other = true;
   const image = str(q.image, `${at}.image`, 4096);
   if (image) out.image = path.resolve(cwd, image);
   return out;
@@ -522,7 +526,7 @@ export function checkAnswer(q: BlueprintQuestion, raw: unknown, at = q.id): Blue
   const out: BlueprintAnswer = {};
   if (value !== undefined) out.value = value;
   if (r.other !== undefined && r.other !== null && r.other !== '') {
-    if (!q.other) bad(`${at} has no Other to write in.`);
+    if (q.kind !== 'single' && q.kind !== 'multi') bad(`${at} has no Other to write in.`);
     if (typeof r.other !== 'string' || r.other.length > 4000) bad(`${at}.other must be text of at most 4000 characters.`);
     if (r.other.trim()) out.other = r.other;
   }

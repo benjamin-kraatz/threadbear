@@ -763,7 +763,9 @@ it needs you, and opening it shows the form.
 
 A round has a title, a line on what the agent understood so far, and its
 questions: pick one or several, type, give a number, choose files from the
-project, or add a file from your Mac. A plain question needs your answer. One
+project, or add a file from your Mac. Every pick-one or pick-several
+question ends with an Other row, for an answer in your own words when none
+of the options fits. A plain question needs your answer. One
 with a recommendation shows it under the options with a "Use" link. Some
 things are listed as assumptions in a folded strip at the foot of the round;
 open one and press "Ask me instead" and it comes back as a question in the

@@ -41,14 +41,14 @@
   },
   "blueprints": {
     "perRole": {
-      "blueprint": 3420,
+      "blueprint": 3436,
       "sideChat": 423,
       "check": 1439,
       "build": 435
     },
     "instructions": 1246,
     "perTool": {
-      "ask_round": 2537,
+      "ask_round": 2553,
       "blueprint_written": 615,
       "propose_answer": 423,
       "report_check": 1439,

@@ -311,13 +311,13 @@ test("a check round's answers name each finding by its first sentence", async ()
   assert.doesNotMatch(text, /What should the spec do about this/);
 });
 
-test('a choice question may take a written Other, which the agent reads as "Other: ..."', () => {
+test('every choice question takes a written Other, which the agent reads as "Other: ..."', () => {
   const r = checkRound({ title: 'T', questions: [
-    { id: 'one', text: 'Which?', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], other: true, youDecide: false },
-    { id: 'many', text: 'Which ones?', kind: 'multi', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], other: true },
+    { id: 'one', text: 'Which?', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], youDecide: false },
+    { id: 'many', text: 'Which ones?', kind: 'multi', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }], other: false },
     { id: 'plain', text: 'Name?', kind: 'text', other: true },
   ] }, 'r1', '/repo');
-  assert.deepEqual(r.questions.map((q) => q.other), [true, true, undefined], 'only single and multi');
+  assert.deepEqual(r.questions.map((q) => q.other), [true, true, undefined], 'single and multi, whatever the agent said; never text');
   const a = checkAnswers(r, { 'r1.one': { other: 'Something in between' }, 'r1.many': { value: ['a'], other: 'and C' } });
   assert.deepEqual(a, { 'r1.one': { other: 'Something in between' }, 'r1.many': { value: ['a'], other: 'and C' } });
   assert.throws(() => checkAnswers(r, { 'r1.plain': { value: 'x', other: 'y' } }), /no Other to write in/);

@@ -647,14 +647,14 @@ private struct QuestionView: View {
                 .labelsHidden()
                 .fixedSize()
                 .tip("Pick one")
-                if question.other { otherRow(multiple: false) }
+                otherRow(multiple: false)
             } else {
                 VStack(alignment: .leading, spacing: zoomed(8)) {
                     ForEach(question.options) { option in
                         // A pick clears a written Other: a single has one answer.
                         OptionRow(option: option, picked: answer?.value?.text == option.id, multiple: false) { set(.text(option.id)) }
                     }
-                    if question.other { otherRow(multiple: false) }
+                    otherRow(multiple: false)
                 }
             }
         case .multi:
@@ -669,7 +669,9 @@ private struct QuestionView: View {
                                                BlueprintAnswer(value: .list(question.options.map(\.id).filter { next.contains($0) }), other: answer?.other))
                     }
                 }
-                if question.other { otherRow(multiple: true) }
+                // On every choice question, whatever the agent set: the user
+                // decides whether an answer is in their own words.
+                otherRow(multiple: true)
             }
         case .number:
             NumberField(question: question, value: answer?.value?.number) { set(.number($0)) }

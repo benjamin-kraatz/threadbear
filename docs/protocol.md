@@ -4195,14 +4195,14 @@ type Question = {
   youDecide: boolean         // default true; false means needs you
   min?: number; max?: number; step?: number                 // number
   several?: boolean          // files, upload: more than one
-  other?: true               // single, multi: a written "Other" beside the options
+  other?: true               // single, multi: always set; the agent's flag is ignored
   image?: string             // absolute path, shown above the question
   moot?: string              // set by a later round: why it no longer applies
 }
 
 type Answer = {
   value?: string | string[] | number   // by kind; files and upload: paths
-  other?: string             // the written Other (question has other); single's value may be absent
+  other?: string             // the written Other (single, multi); single's value may be absent
   youDecide?: true
   usedRecommendation?: true
   fromSideChat?: true
@@ -4227,9 +4227,10 @@ kind stores its answer in `Answer.value` as follows:
 | `upload` | files copied to `<blueprint>/attachments/`, paths relative to the blueprint folder: a draft or Continue may give a path on the Mac, and the runner copies it there |
 
 A question may carry an `image` shown above it, and an option a `note`, one
-line under its label. A `single` or `multi` question with `other: true` also
-takes a written answer, `Answer.other`, which the agent reads as
-"Other: <text>". A check round's answers name each finding by its first
+line under its label. Every `single` or `multi` question also takes a
+written answer, `Answer.other`, which the agent reads as "Other: <text>";
+the runner stores `other: true` on them whatever the agent passed, so the
+user decides whether to answer in their own words. A check round's answers name each finding by its first
 sentence, as the agent had the whole finding already.
 
 ```ts

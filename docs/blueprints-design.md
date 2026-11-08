@@ -85,8 +85,8 @@ Each question has a kind, and the agent picks how to put it:
 
 | Kind | Draws as | Stores |
 |---|---|---|
-| `single` | radio buttons, or a menu past 6 options; with `other`, a written Other too | option id, or none with a written `other` |
-| `multi` | checkboxes; with `other`, a written Other too | option ids, and any written `other` |
+| `single` | radio buttons, or a menu past 6 options, and a written Other | option id, or none with a written `other` |
+| `multi` | checkboxes, and a written Other | option ids, and any written `other` |
 | `text` | a text field, multi-line | string |
 | `number` | a field, with a slider when `min` and `max` are set | number |
 | `files` | a picker rooted at the project folder, several allowed | paths relative to the project folder |
@@ -383,7 +383,7 @@ type Question = {
   youDecide: boolean         // default true; false means needs you
   min?: number; max?: number; step?: number                 // number
   several?: boolean          // files, upload: more than one
-  other?: true               // single, multi: a written "Other" beside the options
+  other?: true               // single, multi: always; the agent's flag is ignored (Benjamin, 8 Nov)
   image?: string             // absolute path, shown above the question
   moot?: string              // set by a later round: why it no longer applies
 }

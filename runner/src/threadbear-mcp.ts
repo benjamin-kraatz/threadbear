@@ -630,7 +630,7 @@ export function buildThreadbearTools(
       max: z.number().optional(),
       step: z.number().optional(),
       several: d(z.boolean().optional(), 'files, upload: more than one.'),
-      other: d(z.boolean().optional(), 'single, multi: a written Other too.'),
+      other: d(z.boolean().optional(), 'Ignored: single, multi always take a written Other.'),
       image: d(z.string().optional(), 'A picture to show above it.'),
     };
   };
