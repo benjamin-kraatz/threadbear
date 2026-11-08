@@ -713,6 +713,89 @@ off Look at threads there to pause it; what's queued waits until you turn
 it back on. If it files a thread wrongly, take the thread out of the
 project and it won't put it back.
 
+## Blueprints
+<!-- slug: blueprints -->
+
+A blueprint is for a big feature, where the work goes better if an agent
+asks you questions first. You describe the feature, the agent reads the code
+and puts rounds of questions, and when it's clear it writes a spec into your
+repo. For a small fix, use a normal thread: if the agent thinks a blueprint
+is too much, it offers "Start a thread", and a muted "Ask me anyway" if you
+want the questions after all.
+
+Start one from the Blueprints button under the Librarian's. The list is
+grouped by project, then by state: Waiting for you, Drafting, Ready, Building
+and Done. New blueprint is at the top: pick a project or make one, describe
+the feature and send. A blueprint is a thread, so it shows in the Inbox when
+it needs you, and opening it shows the form.
+
+A round has a title, a line on what the agent understood so far, and its
+questions: pick one or several, type, give a number, choose files from the
+project, or add a file from your Mac. A plain question needs your answer. One
+with a recommendation shows it under the options with a "Use" link. Some
+things are listed as assumptions in a folded strip at the foot of the round;
+open one and press "Ask me instead" and it comes back as a question in the
+next round. "You decide" leaves a question to the agent, which uses its
+recommendation or picks when it reads the round.
+
+"Ask about this" opens a side chat beside the form, with an agent that knows
+the feature, the rounds so far and that question. It can read the code but
+not change anything, and it runs on a cheaper model. When it has a view it
+shows a "Proposed answer" card with Use, and the answer is marked "from side
+chat". Nothing moves until you press Use.
+
+Continue sends the round once every plain question has an answer. Text typed
+in the composer ("Add a note for the agent") goes with it, and Return does
+what Continue does when it's ready. From round two, "Write it now" sends the
+round and tells the agent to write the spec with what it has.
+
+You can change an answer any time. Before the spec exists it shows "changed"
+and Continue reads "Continue with changes". After it, the blueprint goes back
+to Drafting with "The spec is older than your answers" and an "Update the
+spec" button. While building or done, answers lock, and the control is "Send
+a change to the build thread".
+
+The files are in the project's folder, under `.threadbear/blueprints/<slug>/`,
+and you commit them with your code: `spec.md` (overview, decisions,
+assumptions, steps, open points), `answers.md` (every question with your
+answer and the choices you didn't pick) and `attachments/`. The rounds and
+which threads built it stay in Threadbear's data folder, not your repo.
+
+Once the spec is written, a cheap check reads it against the code and comes
+back as one more round to answer. "Checked, nothing found" shows in the
+header when it has nothing to say, and "Check the spec" runs it again. If
+you edit `spec.md` yourself it says "Edited by hand": Show changes draws the
+difference, and Tell the agent sends it to the blueprint's agent. A `spec.md`
+found in a project folder with no history here is listed as Ready, with no
+answers to change.
+
+A Ready blueprint shows its steps as a checklist with three start buttons:
+Start a thread, Start with subagents (the thread works independent steps
+with subagents), and Start as threads, one thread per step, which is coming
+later. Leaving it Ready saves it for later. The build thread's first lines
+say how it will go about step one, the files and the tests, so you can
+interrupt if they're wrong. It asks rather than guesses when the spec is
+silent, and ticks steps off as it finishes them. The blueprint is Done when
+every step is, and stays in your repo until you delete it. Delete blueprint
+(the ... menu) asks first, then removes `spec.md`, `answers.md` and
+`attachments/` and archives its threads; a folder with anything else in it is
+left alone.
+
+Blueprint settings belong to the project: which of its folders holds them,
+the directory inside it (`.threadbear/blueprints` by default) and whether the
+check runs. An agent can set them with `update_project`. A template, in
+`.threadbear/blueprints/template.md` in a project or
+`~/.threadbear/blueprints/template.md` for all of them, is guidance to the
+agent ("always settle telemetry and settings"), not questions asked word for
+word.
+
+The header shows the cost so far, side chats and check included, a switch
+between rounds stacked or one at a time, and a Transcript toggle. The iPhone
+app only tells you to open a blueprint on your Mac for now. If you don't
+want the feature, turn off "Show Blueprints" in Settings > General; the
+button goes, and a blueprint thread you open from the Inbox still shows its
+form.
+
 ## Schedules
 <!-- slug: schedules -->
 

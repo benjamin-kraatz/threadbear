@@ -58,6 +58,11 @@ export const threadFields = {
   // Who started it, when that wasn't Mike: the row's byline
   // (docs/protocol.md, "Who started a thread"). Since API 22.
   startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), why: v.optional(v.string()) })),
+  // A blueprint ("blueprint"), or one of its side chats or checks
+  // ("sideChat", "check") with its blueprint thread as parentThreadId, which
+  // the phone leaves out of its lists (docs/protocol.md, "Blueprints"). Since API 61.
+  kind: v.optional(v.string()),
+  parentThreadId: v.optional(v.string()),
   // What Mike last said to it, one line: the row's "You: ..."
   // (docs/protocol.md, "What Mike last asked"). Since API 31.
   asked: v.optional(v.string()),
@@ -248,6 +253,9 @@ export default defineSchema({
     starredAt: v.optional(v.string()), // since API 27
     // Who started it, when that wasn't Mike: the row's byline. Since API 23.
     startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
+    // A blueprint or one of its children, as on threads. Since API 61.
+    kind: v.optional(v.string()),
+    parentThreadId: v.optional(v.string()),
     // What Mike last said to it, one line: the Mac row's "You: ...". Since API 32.
     asked: v.optional(v.string()),
     // Since API 29: when the backend last wrote the row, so a watching

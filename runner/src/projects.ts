@@ -16,7 +16,8 @@ import crypto from 'node:crypto';
 import type { Clock } from './clock.ts';
 import type { Logger } from './log.ts';
 import type { Notification } from './runner.ts';
-import type { Project, ProjectIcon, ProjectLink, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
+import type { Project, ProjectBlueprints, ProjectIcon, ProjectLink, ProjectMaker, ThreadProject, ThreadSummary } from './protocol.ts';
+import { checkDir } from './blueprints.ts';
 import { ErrorCode, RpcError } from './protocol.ts';
 import type { ThreadRecord } from './store.ts';
 import type { ProjectFolder } from './patches.ts';
@@ -76,6 +77,9 @@ export type UpdateProjectParams = {
   links?: LinkInput[];
   // A Notion page or database with the project's tasks; empty takes it off.
   notion?: string;
+  // Where its blueprints live and whether a written spec is checked
+  // (docs/protocol.md, "Blueprints"); null or {} goes back to the defaults.
+  blueprints?: ProjectBlueprints | null;
   archived?: boolean;
   // Who's changing the title, kept as titleBy. Absent counts as Mike, so a
   // name from somewhere unknown is never renamed by the librarian.
@@ -364,6 +368,11 @@ export class Projects {
       const n = checkNotion(params.notion);
       if (n) next.notion = n;
       else delete next.notion;
+    }
+    if (params.blueprints !== undefined) {
+      const b = checkBlueprints(params.blueprints, next.folders);
+      if (b) next.blueprints = b;
+      else delete next.blueprints;
     }
     if (params.archived !== undefined) {
       if (params.archived) next.archived = true;
@@ -732,6 +741,27 @@ function bad(message: string): RpcError {
   return new RpcError(ErrorCode.badParams, message);
 }
 
+// A project's blueprint settings: the folder one of its own, the dir inside
+// it, check a boolean. Undefined when they're all the defaults.
+function checkBlueprints(v: unknown, folders: string[]): ProjectBlueprints | undefined {
+  if (v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) throw bad('blueprints must be an object with folder, dir and check');
+  const o = v as Record<string, unknown>;
+  const out: ProjectBlueprints = {};
+  if (o.folder !== undefined && o.folder !== null && o.folder !== '') {
+    if (typeof o.folder !== 'string') throw bad('blueprints.folder must be one of the project\'s folders');
+    const folder = path.resolve(expandHome(o.folder));
+    if (!folders.includes(folder)) throw bad(`blueprints.folder must be one of the project's folders: ${folders.join(', ') || 'it has none'}`);
+    out.folder = folder;
+  }
+  if (o.dir !== undefined && o.dir !== null && o.dir !== '') out.dir = checkDir(o.dir);
+  if (o.check !== undefined && o.check !== null) {
+    if (typeof o.check !== 'boolean') throw bad('blueprints.check must be true or false');
+    if (!o.check) out.check = false;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 // ------------------------------------------------------------- the methods
 
 export function projectMethods(projects: Projects): Record<string, (p: Record<string, unknown>) => unknown> {
@@ -759,6 +789,7 @@ export function projectMethods(projects: Projects): Record<string, (p: Record<st
         notes: str(p, 'notes'),
         links: links(p),
         notion: str(p, 'notion'),
+        ...(p.blueprints !== undefined ? { blueprints: p.blueprints as ProjectBlueprints | null } : {}),
         archived: bool(p, 'archived'),
         by: 'mike',
       }),

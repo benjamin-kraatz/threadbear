@@ -451,6 +451,7 @@ function fitThread<T extends Record<string, any>>(t: T): T | undefined {
   // push every other Mac's threads off them.
   if (typeof out.lastActivityMs === 'number') out.lastActivityMs = Math.min(out.lastActivityMs, Date.now());
   for (const f of ['title', 'preview', 'cwd', 'working', 'asked']) if (typeof out[f] === 'string') out[f] = cutBytes(out[f], f === 'title' ? 300 : CAP.threadText);
+  for (const f of ['kind', 'parentThreadId']) if (typeof out[f] === 'string') out[f] = cutBytes(out[f], 100);
   if (out.startedBy) out.startedBy = { ...out.startedBy, label: cutBytes(String(out.startedBy.label ?? ''), 100), ...(out.startedBy.why !== undefined ? { why: cutBytes(String(out.startedBy.why), 300) } : {}) };
   // The card waiting on Mike is cut, never dropped: the phone shows the
   // thread waiting, and its push goes, with shorter text.
@@ -511,6 +512,7 @@ function sameButtons(a: unknown[] | undefined, b: unknown[] | undefined): boolea
 function fitIndexRow<T extends Record<string, any>>(r: T): T | undefined {
   const out: Record<string, any> = { ...r };
   for (const f of ['title', 'preview', 'cwd', 'asked']) if (typeof out[f] === 'string') out[f] = cutBytes(out[f], 300);
+  for (const f of ['kind', 'parentThreadId']) if (typeof out[f] === 'string') out[f] = cutBytes(out[f], 100);
   if (out.startedBy) out.startedBy = { ...out.startedBy, label: cutBytes(String(out.startedBy.label ?? ''), 100), ...(out.startedBy.why !== undefined ? { why: cutBytes(String(out.startedBy.why), 300) } : {}), ...(out.startedBy.threadTitle !== undefined ? { threadTitle: cutBytes(String(out.startedBy.threadTitle), 200) } : {}) };
   return docBytes(out) <= CAP.indexRow ? (out as T) : undefined;
 }
@@ -2914,6 +2916,8 @@ const indexDoc = v.object({
   archivedAt: v.optional(v.string()),
   starredAt: v.optional(v.string()),
   startedBy: v.optional(v.object({ kind: v.string(), label: v.string(), icon: v.optional(v.string()), threadTitle: v.optional(v.string()), why: v.optional(v.string()) })),
+  kind: v.optional(v.string()), // since API 61
+  parentThreadId: v.optional(v.string()), // since API 61
   asked: v.optional(v.string()), // since API 32
 });
 

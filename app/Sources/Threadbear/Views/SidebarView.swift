@@ -35,6 +35,7 @@ struct SidebarView: View {
                 case .scheduled: ScheduledList()
                 case .projects: ProjectsList()
                 case .librarian: LibrarianView()
+                case .blueprints: BlueprintsList()
                 }
             }
             .transition(Juice.reduceMotion ? .opacity : .asymmetric(

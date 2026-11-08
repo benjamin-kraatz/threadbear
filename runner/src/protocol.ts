@@ -246,6 +246,12 @@ export type ThreadSummary = {
   // Who started it, when that wasn't Mike (docs/protocol.md, "Who started
   // a thread"). Absent for his own threads.
   startedBy?: ThreadStartedBy;
+  // A blueprint, or a child of one (docs/protocol.md, "Blueprints"); absent
+  // for an ordinary thread. parentThreadId: a side chat's or check's
+  // blueprint thread. blueprint: on a blueprint thread.
+  kind?: ThreadKind;
+  parentThreadId?: string;
+  blueprint?: Blueprint;
   // Mike's last message to it, one line, for the sidebar's "You: ..."
   // (docs/protocol.md, "What Mike last asked"). Absent until he's sent one.
   asked?: string;
@@ -295,7 +301,7 @@ export type ThreadWorktree = { branch: string; mainCheckout: string; path: strin
 
 // The schedule's title as it was when it started the thread.
 export type ThreadSchedule = { id: string; title: string };
-export type ThreadStartedByKind = 'tool' | 'thread' | 'schedule' | 'librarian' | 'runner';
+export type ThreadStartedByKind = 'tool' | 'thread' | 'schedule' | 'librarian' | 'runner' | 'blueprint';
 export type ThreadStartedBy = {
   kind: ThreadStartedByKind;
   label: string; // "Sentry", "Agent", "Schedule"
@@ -344,8 +350,88 @@ export type Project = {
   // the board as last read (see "Project tasks").
   notion?: string;
   tasks?: ProjectTasks;
+  // Where its blueprints live and whether a written spec is checked
+  // (docs/protocol.md, "Blueprints").
+  blueprints?: ProjectBlueprints;
   threadCount: number;
   lastActivityAt?: string;
+};
+
+export type ProjectBlueprints = { folder?: string; dir?: string; check?: boolean };
+
+// Blueprints (docs/protocol.md, "Blueprints"): a feature planned by
+// answering rounds of questions, then a spec in the repo to build from.
+export type ThreadKind = 'blueprint' | 'sideChat' | 'check';
+export type BlueprintStatus = 'drafting' | 'waiting' | 'ready' | 'building' | 'done';
+export type BlueprintQuestionKind = 'single' | 'multi' | 'text' | 'number' | 'files' | 'upload';
+export const BLUEPRINT_QUESTION_KINDS: readonly BlueprintQuestionKind[] = ['single', 'multi', 'text', 'number', 'files', 'upload'];
+export type BlueprintOption = { id: string; label: string; note?: string };
+export type BlueprintQuestion = {
+  id: string;
+  text: string;
+  kind: BlueprintQuestionKind;
+  options?: BlueprintOption[];
+  recommended?: { option?: string; text?: string; why: string };
+  youDecide: boolean; // false: needs you
+  min?: number;
+  max?: number;
+  step?: number;
+  several?: boolean;
+  other?: true; // single, multi: a free-text Other beside the options
+  image?: string;
+  moot?: string;
+};
+export type BlueprintAnswerValue = string | string[] | number;
+export type BlueprintAnswer = {
+  value?: BlueprintAnswerValue;
+  other?: string; // the written Other, on a question with other; single's value may then be absent
+  youDecide?: true;
+  usedRecommendation?: true;
+  fromSideChat?: true;
+  changedAt?: string;
+};
+export type BlueprintAssumption = { id: string; text: string; why: string };
+export type BlueprintRound = {
+  id: string;
+  kind: 'questions' | 'check';
+  title: string;
+  summary?: string;
+  questions: BlueprintQuestion[];
+  assumptions: BlueprintAssumption[];
+  answers: Record<string, BlueprintAnswer>;
+  // The answers as last sent to the agent (drafts not included); absent
+  // until the round is first sent. An answer's changedAt: changed since.
+  sent?: Record<string, BlueprintAnswer>;
+  // Assumptions marked "Ask me instead" (blueprints.askInstead).
+  askInstead?: string[];
+  note?: string;
+  sentAt?: string;
+  writeNow?: true;
+};
+export type BlueprintStep = { id: string; title: string; done?: { at: string; note: string; threadId: string } };
+export type BlueprintBuild = { threadId: string; mode: 'thread' | 'subagents'; at: string };
+export type Blueprint = {
+  id: string;
+  projectId: string;
+  folder: string;
+  path: string;
+  slug: string;
+  title: string;
+  status: BlueprintStatus;
+  threadId?: string;
+  rounds: BlueprintRound[];
+  steps: BlueprintStep[];
+  builds: BlueprintBuild[];
+  sideChats: Record<string, string>;
+  checkThreadId?: string;
+  checked?: { at: string; findings: number };
+  editedByHand?: true;
+  specStale?: true;
+  // The agent called too_small: the app draws its card in place of the form.
+  tooSmall?: { why: string; at: string };
+  costUsd: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 // A project's task board, read from the Notion database on its page.
@@ -693,7 +779,7 @@ export type EventBody =
   | { type: 'button.updated'; button: ReplyButton }
   // origin is set only on messages the runner sent by itself (the resume
   // after a restart).
-  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number }
+  | { type: 'user.message'; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; roundId?: string }
   // summary: the turn's summary, written by the runner from end_turn
   // givesWay: the turn's summary, with bullet replies off: any message of
   // the turn is the reply over it, however short
@@ -774,7 +860,16 @@ export type EventBody =
     }
   // Mike edited the message at fromSeq (docs/protocol.md, "Editing a
   // message"): fromSeq..toSeq are gone from the conversation. Outside any turn.
-  | { type: 'thread.rewound'; fromSeq: number; toSeq: number; files: RewoundFiles };
+  | { type: 'thread.rewound'; fromSeq: number; toSeq: number; files: RewoundFiles }
+  // Blueprints (docs/protocol.md, "Blueprints"). round carries no answers:
+  // the summary's blueprint has them.
+  | { type: 'blueprint.round'; round: BlueprintRound }
+  | { type: 'blueprint.answered'; roundId: string; answers: Record<string, BlueprintAnswer>; note?: string; writeNow?: true }
+  | { type: 'blueprint.tooSmall'; why: string }
+  | { type: 'blueprint.written'; steps: BlueprintStep[]; path: string }
+  | { type: 'blueprint.step'; stepId?: string; done?: { at: string; note: string; threadId: string }; all?: true }
+  // On a side chat: its propose_answer, drawn as a card with Use.
+  | { type: 'blueprint.proposal'; blueprintId: string; questionId: string; answer: BlueprintAnswer };
 
 // What an edit did to the files the agent had changed since the message.
 // how: "checkpoint" when Claude's own file checkpoints put them back,

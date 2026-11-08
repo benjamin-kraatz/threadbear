@@ -28,6 +28,7 @@ struct ProjectPage: View {
                 TasksSection(project: project)
                 TextSection(project: project, field: .notes)
                 FoldersSection(project: project)
+                BlueprintsSettingsSection(project: project)
                 ThreadsSection(project: project, threads: threads)
                 PatchesSection(project: project, threads: threads)
             }
@@ -537,6 +538,89 @@ private struct FolderRow: View {
         .padding(.vertical, zoomed(3))
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+    }
+}
+
+/// Where its blueprints live and whether a written spec is checked
+/// (docs/protocol.md, "Blueprints"): which folder, the directory in it,
+/// and the check. Each change goes to the runner at once.
+private struct BlueprintsSettingsSection: View {
+    @Environment(AppModel.self) private var app
+    let project: Project
+    @State private var dir = ""
+    @FocusState private var editingDir: Bool
+
+    var body: some View {
+        let folder = ProjectBlueprints.folder(of: project)
+        VStack(alignment: .leading, spacing: zoomed(10)) {
+            PageHeading(title: "Blueprints")
+            if project.folders.isEmpty {
+                Text("Add a folder first: blueprints are written into one of the project's folders.")
+                    .font(.system(size: TypeScale.label))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+            } else {
+                row("Folder") {
+                    // The first folder is the default, with a star.
+                    IconMenu {
+                        ForEach(Array(project.folders.enumerated()), id: \.element) { index, item in
+                            Button {
+                                app.setProjectBlueprints(project.id, ProjectBlueprints.changed(project, folder: .some(item)), field: "folder")
+                            } label: {
+                                if index == 0 {
+                                    Label(item.abbreviatingHome, systemImage: "star.fill")
+                                } else if item == folder {
+                                    Label(item.abbreviatingHome, systemImage: "checkmark")
+                                } else {
+                                    Text(item.abbreviatingHome)
+                                }
+                            }
+                        }
+                    } label: {
+                        Text((folder ?? "").abbreviatingHome).lineLimit(1).truncationMode(.middle)
+                    }
+                    .fixedSize()
+                    .busy(app.isBusy(BusyKey.projectBlueprints(project.id, "folder")))
+                    .tip("Which of the project's folders its blueprints are written into; the starred one, its first, is the default")
+                }
+                row("Directory") {
+                    TextField(ProjectBlueprints.defaultDir, text: $dir)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: TypeScale.label, design: .monospaced))
+                        .focused($editingDir)
+                        .frame(maxWidth: zoomed(300))
+                        .onSubmit { saveDir() }
+                        .onChange(of: editingDir) { _, editing in if !editing { saveDir() } }
+                        .busy(app.isBusy(BusyKey.projectBlueprints(project.id, "dir")))
+                        .tip("Where in that folder each blueprint gets its own folder; empty is \(ProjectBlueprints.defaultDir)")
+                }
+                Toggle("Check the spec when it's written", isOn: Binding(
+                    get: { ProjectBlueprints.checks(project) },
+                    set: { app.setProjectBlueprints(project.id, ProjectBlueprints.changed(project, check: .some($0)), field: "check") }))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: TypeScale.label))
+                    .busy(app.isBusy(BusyKey.projectBlueprints(project.id, "check")))
+                    .tip("Have a cheaper agent read each new spec against the code and ask about anything that doesn't fit")
+            }
+        }
+        .onAppear { dir = project.blueprints?.dir ?? "" }
+        .onChange(of: project.blueprints?.dir) { _, now in if !editingDir { dir = now ?? "" } }
+    }
+
+    private func row<Control: View>(_ title: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: zoomed(10)) {
+            Text(title)
+                .font(.system(size: TypeScale.label))
+                .foregroundStyle(.secondary)
+                .frame(width: zoomed(80), alignment: .leading)
+            control()
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func saveDir() {
+        let next = ProjectBlueprints.changed(project, dir: .some(dir))
+        guard next != (project.blueprints ?? ProjectBlueprints()) else { return }
+        app.setProjectBlueprints(project.id, next, field: "dir")
     }
 }
 

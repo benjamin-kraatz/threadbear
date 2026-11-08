@@ -22,6 +22,7 @@ extension AppModel {
         showsProjectsHome = false
         showsLibrarianHome = false
         showsScheduledHome = false
+        showsBlueprintsHome = false
         stopShowingSubagent()
         guard let threadId else { return }
         let session = session(for: threadId)

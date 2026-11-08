@@ -18,6 +18,8 @@ import { z } from 'zod';
 import { NAMESPACE_DESCRIPTION, toolGuidance, type ToolDefinition } from '../../src/adapters/codex/tools.ts';
 import { worktreeInstructions } from '../../src/worktrees.ts';
 import { USER_NAME } from '../../src/user-name.ts';
+import { blueprintInstructions } from '../../src/blueprints.ts';
+import type { BlueprintRole } from '../../src/runner/blueprints.ts';
 
 const BUDGET_FILE = path.resolve(import.meta.dirname, '..', '..', 'context-budget.json');
 const REPO = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -40,13 +42,30 @@ const bytes = (s: string) => Buffer.byteLength(norm(s), 'utf8');
 function stub<T extends object>(): T {
   return new Proxy({}, { get: () => () => undefined }) as T;
 }
-function tools(provider: 'claude' | 'codex', oneReply: boolean): ToolDefinition[] {
+function tools(provider: 'claude' | 'codex', oneReply: boolean, blueprintRole?: BlueprintRole): ToolDefinition[] {
   return buildThreadbearTools(stub<ThreadControl>(), SELF, () => 0, stub(), stub(), stub(), {
     provider,
     oneReply: () => oneReply,
     bulletReplies: () => true,
     pocket: () => stub(),
+    blueprintRole: () => blueprintRole,
   }) as unknown as ToolDefinition[];
+}
+
+// A blueprint's threads (docs/protocol.md, "Blueprints") get a tool or
+// three more than every thread, and the blueprint thread its instructions:
+// what each role adds, measured on its own.
+function blueprintExtras() {
+  const base = new Set(tools('claude', true).map((t) => t.name));
+  const perRole: Record<string, number> = {};
+  const perTool: Record<string, number> = {};
+  for (const role of ['blueprint', 'sideChat', 'check', 'build'] as const) {
+    const extra = tools('claude', true, role).filter((t) => !base.has(t.name));
+    for (const t of extra) perTool[t.name] = bytes(spec(t));
+    perRole[role] = extra.reduce((sum, t) => sum + bytes(spec(t)), 0);
+  }
+  const instructions = bytes(blueprintInstructions({ path: '/repo/.threadbear/blueprints/a-feature' }, ''));
+  return { perRole, instructions, perTool: Object.fromEntries(Object.entries(perTool).sort()) };
 }
 
 // A tool as the model sees it: name, description and JSON Schema. Most
@@ -79,6 +98,7 @@ export function measure() {
     codex: { instructions: codexInstructions, tools: codexTools.total, total: codexInstructions + codexTools.total },
     worktreeInstructions: worktree,
     perTool: claudeTools.perTool,
+    blueprints: blueprintExtras(),
   };
 }
 

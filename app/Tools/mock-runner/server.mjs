@@ -650,6 +650,12 @@ async function dispatch(client, method, p) {
     }
     case 'threads.send': {
       const t = need(p.threadId);
+      if (t.summary.kind === 'blueprint' && /^ask me anyway$/i.test(String(p.text ?? '').trim())) {
+        const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+        persist(t.summary.id, { type: 'user.message', text: p.text, images: [] }, turnId);
+        setTimeout(() => putDemoRound(t, turnId), 600);
+        return { turnId };
+      }
       // A message declines any secret card still open, first (docs/
       // protocol.md, "Secrets"), as the real runner does.
       const resolved = new Set(t.events.filter((e) => e.type === 'approval.resolved').map((e) => e.approvalId));
@@ -1234,6 +1240,24 @@ async function dispatch(client, method, p) {
     // Settings (docs/protocol.md, "Settings and models"), kept in memory.
     // Like the real runner, the key itself is never kept or sent back:
     // only whether one is set and its last 4 characters.
+    // Blueprints (docs/protocol.md, "Blueprints"): made-up rounds, side
+    // chats and build threads, so the form can be tried end to end.
+    case 'blueprints.list':
+    case 'blueprints.create':
+    case 'blueprints.saveDraft':
+    case 'blueprints.continue':
+    case 'blueprints.askInstead':
+    case 'blueprints.sideChat':
+    case 'blueprints.useProposal':
+    case 'blueprints.check':
+    case 'blueprints.start':
+    case 'blueprints.diff':
+    case 'blueprints.tellAgent':
+    case 'blueprints.updateSpec':
+    case 'blueprints.tooSmallStart':
+    case 'blueprints.delete':
+      if (oldRunner) throw rpcError(-32601, `Unknown method ${method}`);
+      return blueprintRequest(method, p);
     // Projects and the librarian (docs/protocol.md, "Projects"). A runner
     // played as old (mock.accounts {old: true}) has none of them.
     case 'projects.list':
@@ -2348,6 +2372,381 @@ function addDemoSchedules() {
   }
 }
 
+// The app's icon for Threadbear's project, copied into the data folder: a
+// checkout on an external drive makes the app ask for access to removable
+// volumes, and its main thread waits in open() until someone answers.
+function demoIconPath() {
+  const source = fileURLToPath(new URL('../../icons/threadbear.png', import.meta.url));
+  const copy = path.join(dataDir, 'icons/threadbear.png');
+  try {
+    fs.mkdirSync(path.dirname(copy), { recursive: true });
+    fs.copyFileSync(source, copy);
+    return copy;
+  } catch {
+    return source;
+  }
+}
+
+// ---------------------------------------------------------------- blueprints
+
+// Found in a project's folder with no state here (a clone): listed as
+// Ready with no thread, as the runner does.
+let foundBlueprints = [{
+  id: 'bp_found_orders', projectId: 'p_7a2c41f0', folder: '/Users/mike/dev/photo-sync', path: '/Users/mike/dev/photo-sync/.threadbear/blueprints/order-sheet-export',
+  slug: 'order-sheet-export', title: 'Order sheet export', status: 'ready', rounds: [], steps: [], builds: [], sideChats: {}, costUsd: 0.96,
+  createdAt: iso(-86_400_000), updatedAt: iso(-86_400_000),
+}];
+
+function blueprintThreads() {
+  return [...threads.values()].filter((t) => t.summary.kind === 'blueprint' && t.summary.blueprint && !t.summary.archivedAt);
+}
+
+function needBlueprint(id) {
+  const t = blueprintThreads().find((t) => t.summary.blueprint.id === id);
+  if (!t) {
+    if (foundBlueprints.some((b) => b.id === id)) return { found: foundBlueprints.find((b) => b.id === id) };
+    throw rpcError(-32602, `Blueprint not found: ${id}`);
+  }
+  return { t, bp: t.summary.blueprint };
+}
+
+function touchBlueprint(t) {
+  const bp = t.summary.blueprint;
+  bp.updatedAt = iso();
+  bp.costUsd = t.summary.costUsd ?? bp.costUsd ?? 0;
+  t.summary.needsYou = bp.status === 'waiting';
+  broadcastSummary(t.summary.id);
+  return bp;
+}
+
+const given = (a) => a && (a.youDecide || a.usedRecommendation || (typeof a.other === 'string' && a.other.trim() !== '')
+  || (a.value !== undefined && a.value !== '' && !(Array.isArray(a.value) && !a.value.length)));
+// As the runner refuses them: "" for a single, a number out of range.
+function checkAnswers(round, answers) {
+  for (const [qid, answer] of Object.entries(answers)) {
+    const q = round.questions.find((x) => x.id === qid);
+    if (!q || answer?.value === undefined) continue;
+    if (q.kind === 'single' && !q.options?.some((o) => o.id === answer.value)) throw rpcError(-32602, `Not an option of ${qid}: ${JSON.stringify(answer.value)}`);
+    if (q.kind === 'number' && (typeof answer.value !== 'number' || (q.min !== undefined && answer.value < q.min) || (q.max !== undefined && answer.value > q.max))) {
+      throw rpcError(-32602, `Out of range for ${qid}: ${answer.value}`);
+    }
+  }
+}
+
+// An upload's Mac path becomes one in the blueprint's attachments folder,
+// as the runner copies it there (the mock copies nothing).
+function keepUploads(bp, round, answers) {
+  const out = {};
+  for (const [qid, answer] of Object.entries(answers)) {
+    const q = round.questions.find((x) => x.id === qid);
+    if (q?.kind === 'upload' && Array.isArray(answer?.value)) {
+      out[qid] = { ...answer, value: answer.value.map((v) => (v.startsWith('/') ? `attachments/${path.basename(v)}` : v)) };
+    } else {
+      out[qid] = answer;
+    }
+  }
+  return out;
+}
+
+const sameAnswer = (a, b) => JSON.stringify([a?.value, a?.other || undefined, !!a?.youDecide, !!a?.usedRecommendation])
+  === JSON.stringify([b?.value, b?.other || undefined, !!b?.youDecide, !!b?.usedRecommendation]);
+
+// A made-up next round, as the agent would put it.
+function putDemoRound(t, turnId) {
+  const bp = t.summary.blueprint;
+  const n = bp.rounds.filter((r) => r.kind !== 'check').length + 1;
+  const round = {
+    id: 'r' + n + '_' + crypto.randomBytes(2).toString('hex'), kind: 'questions', title: n === 1 ? 'The shape of it' : 'The details',
+    summary: 'you want this to stay small and to work the way the rest of the app does.',
+    questions: [
+      { id: `q${n}a`, text: 'Who is this for first?', kind: 'single', youDecide: false, other: true,
+        options: [{ id: 'me', label: 'Just me', note: 'Only this Mac.' }, { id: 'everyone', label: 'Everyone running Threadbear' }] },
+      { id: `q${n}b`, text: 'Anything it must not touch?', kind: 'text', youDecide: true },
+      { id: `q${n}c`, text: 'How many at most?', kind: 'number', youDecide: true, min: 1, max: 10, step: 1, recommended: { text: '3', why: 'enough without crowding the menu' } },
+      { id: `q${n}d`, text: 'A kind from a newer runner', kind: 'colour', youDecide: true },
+      { id: `q${n}e`, text: 'Any pictures of how it should look?', kind: 'upload', youDecide: true, several: true },
+    ],
+    assumptions: [{ id: `a${n}a`, text: 'It ships off by default for others.', why: 'New behaviour lands that way.' }],
+    answers: {},
+  };
+  delete bp.tooSmall;
+  bp.rounds.push(round);
+  bp.status = 'waiting';
+  persist(t.summary.id, { type: 'turn.started', turnId }, turnId);
+  persist(t.summary.id, { type: 'assistant.text', itemId: 'm_' + round.id, text: `Round ${n} is ready.` }, turnId);
+  persist(t.summary.id, { type: 'blueprint.round', round: { ...round, answers: {} } }, turnId);
+  t.summary.costUsd = (t.summary.costUsd ?? 0) + 0.12;
+  persist(t.summary.id, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: 4000, costUsd: 0.12, needs: 'you' }, turnId);
+  t.summary.status = 'idle';
+  touchBlueprint(t);
+}
+
+// The spec written: five steps, Ready, and the check finding nothing.
+function writeDemoSpec(t, turnId) {
+  const bp = t.summary.blueprint;
+  bp.steps = ['Add the setting', 'Use it where it shows', 'Tests for both', 'The guide', 'The protocol note'].map((title, i) => ({ id: 's' + (i + 1), title }));
+  bp.status = 'ready';
+  delete bp.specStale;
+  persist(t.summary.id, { type: 'turn.started', turnId }, turnId);
+  persist(t.summary.id, { type: 'blueprint.written', steps: bp.steps, path: bp.path }, turnId);
+  persist(t.summary.id, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: 6000, costUsd: 0.2, needs: 'nothing' }, turnId);
+  t.summary.status = 'idle';
+  bp.checked = { at: iso(), findings: 0 };
+  touchBlueprint(t);
+}
+
+function makeChild(parent, kind, title, model = 'claude-haiku-5-5') {
+  const id = 'th_' + kind + '_' + crypto.randomBytes(4).toString('hex');
+  const now = iso();
+  const summary = {
+    id, title, cwd: parent.summary.cwd, accountId: parent.summary.accountId, provider: 'claude', model, permissionMode: 'plan',
+    status: 'idle', live: false, needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+    kind, parentThreadId: parent.summary.id,
+  };
+  threads.set(id, { summary, events: [], inProgress: new Map(), timers: [] });
+  return threads.get(id);
+}
+
+function blueprintRequest(method, p) {
+  switch (method) {
+    case 'blueprints.list': {
+      const list = blueprintThreads().map((t) => t.summary.blueprint).concat(foundBlueprints);
+      return { blueprints: p.projectId ? list.filter((b) => b.projectId === p.projectId) : list };
+    }
+    case 'blueprints.create': {
+      if (!p.text) throw rpcError(-32602, 'text is required');
+      let project = p.projectId ? projects.find((x) => x.id === p.projectId) : undefined;
+      if (!project && p.newProject) {
+        project = { id: 'p_' + crypto.randomBytes(4).toString('hex'), title: p.newProject.title, folders: [p.newProject.folder], goals: '', state: '', notes: '', links: [], createdBy: 'mike', createdAt: iso(), updatedAt: iso() };
+        projects.push(project);
+        broadcastProjects();
+      }
+      if (!project) throw rpcError(-32602, 'projectId or newProject is required');
+      const folder = project.folders[0] ?? defaults.cwd;
+      const title = p.text.split('\n')[0].slice(0, 60);
+      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'blueprint';
+      const threadId = 'th_bp_' + crypto.randomBytes(5).toString('hex');
+      const now = iso();
+      const blueprint = {
+        id: 'bp_' + crypto.randomBytes(5).toString('hex'), projectId: project.id, folder, path: `${folder}/.threadbear/blueprints/${slug}`, slug, title,
+        status: 'drafting', threadId, rounds: [], steps: [], builds: [], sideChats: {}, costUsd: 0, createdAt: now, updatedAt: now,
+      };
+      const summary = {
+        id: threadId, title, cwd: folder, accountId: defaults.accountId, provider: 'claude', permissionMode: 'full', status: 'running', live: true,
+        needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0, kind: 'blueprint', blueprint,
+        projects: [{ id: project.id, title: project.title, by: 'mike', pinned: true, at: now }],
+      };
+      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], fresh: true });
+      const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      persist(threadId, { type: 'user.message', text: p.text, images: p.images ?? [] }, turnId);
+      setTimeout(() => {
+        if (/small|rename|typo/i.test(p.text)) {
+          blueprint.tooSmall = { why: 'It looks like a few lines in one or two files.', at: iso() };
+          persist(threadId, { type: 'turn.started', turnId }, turnId);
+          persist(threadId, { type: 'blueprint.tooSmall', why: blueprint.tooSmall.why }, turnId);
+          persist(threadId, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: 3000, costUsd: 0.04, needs: 'you' }, turnId);
+          summary.status = 'idle';
+          summary.needsYou = true;
+          touchBlueprint(threads.get(threadId));
+        } else {
+          putDemoRound(threads.get(threadId), turnId);
+        }
+      }, 1200);
+      return { blueprint, thread: summary };
+    }
+    case 'blueprints.saveDraft': {
+      const { t, bp } = needBlueprint(p.id);
+      const round = bp.rounds.find((r) => r.id === p.roundId);
+      if (!round) throw rpcError(-32602, 'Round not found');
+      const answers = p.answers ?? {};
+      checkAnswers(round, answers);
+      // `changedAt` is "changed since last sent", against `sent`.
+      for (const [qid, answer] of Object.entries(answers)) {
+        if (round.sentAt && !sameAnswer(round.sent?.[qid], answer)) {
+          answer.changedAt ??= iso();
+          if (bp.status === 'ready') { bp.status = 'drafting'; bp.specStale = true; }
+        } else {
+          delete answer.changedAt;
+        }
+      }
+      round.answers = keepUploads(bp, round, answers);
+      if (p.note !== undefined) round.note = p.note;
+      return { blueprint: touchBlueprint(t) };
+    }
+    case 'blueprints.continue': {
+      const { t, bp } = needBlueprint(p.id);
+      const round = bp.rounds.find((r) => r.id === p.roundId);
+      if (!round) throw rpcError(-32602, 'Round not found');
+      const answers = keepUploads(bp, round, p.answers ?? {});
+      checkAnswers(round, answers);
+      const missing = round.questions.filter((q) => q.youDecide === false && !q.moot && !given(answers[q.id]));
+      if (missing.length) throw rpcError(-32602, `Needs an answer: ${missing.map((q) => q.text).join('; ')}`);
+      const wasSent = Boolean(round.sentAt);
+      round.answers = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, { ...v, changedAt: undefined }]));
+      round.sentAt = iso();
+      // As the runner does: earlier rounds' saved changes went in this
+      // message too, so every sent round is now as sent.
+      for (const r of bp.rounds) {
+        if (r !== round && !r.sentAt) continue;
+        for (const answer of Object.values(r.answers)) delete answer.changedAt;
+        r.sent = JSON.parse(JSON.stringify(r.answers));
+      }
+      if (p.note) round.note = p.note;
+      if (p.writeNow) round.writeNow = true;
+      const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      persist(t.summary.id, { type: 'blueprint.answered', roundId: round.id, answers: round.answers, ...(p.note ? { note: p.note } : {}), ...(p.writeNow ? { writeNow: true } : {}) }, turnId);
+      const lines = round.questions.map((q, i) => `${i + 1}. ${q.text} ${given(round.answers[q.id]) ? JSON.stringify(round.answers[q.id].value ?? 'you decide') : 'unanswered'}`);
+      persist(t.summary.id, { type: 'user.message', text: `${wasSent ? 'Changed answers in ' : ''}${round.title}\n${lines.join('\n')}${p.note ? `\n\nNote: ${p.note}` : ''}${p.writeNow ? '\n\nWrite the spec now with what you have.' : ''}`, images: [], roundId: round.id }, turnId);
+      bp.status = 'drafting';
+      t.summary.status = 'running';
+      touchBlueprint(t);
+      // A second later, the next round, or the spec once there are three.
+      const questionRounds = bp.rounds.filter((r) => r.kind !== 'check').length;
+      if (!wasSent) setTimeout(() => (p.writeNow || questionRounds >= 3 ? writeDemoSpec(t, turnId) : putDemoRound(t, turnId)), 1000);
+      else setTimeout(() => { t.summary.status = 'idle'; bp.status = bp.rounds.at(-1) && !bp.rounds.at(-1).sentAt ? 'waiting' : bp.steps.length ? 'ready' : 'drafting'; touchBlueprint(t); }, 800);
+      return { blueprint: bp, turnId };
+    }
+    case 'blueprints.askInstead': {
+      const { t, bp } = needBlueprint(p.id);
+      const round = bp.rounds.find((r) => r.id === p.roundId);
+      const assumption = round?.assumptions.find((a) => a.id === p.assumptionId);
+      if (!assumption) throw rpcError(-32602, 'Assumption not found');
+      round.askInstead = [...new Set([...(round.askInstead ?? []), assumption.id])];
+      return { blueprint: touchBlueprint(t) };
+    }
+    case 'blueprints.sideChat': {
+      const { t, bp } = needBlueprint(p.id);
+      const existing = bp.sideChats[p.questionId];
+      if (existing && threads.has(existing)) return { threadId: existing };
+      const question = bp.rounds.flatMap((r) => r.questions).find((q) => q.id === p.questionId);
+      if (!question) throw rpcError(-32602, 'Question not found');
+      const chat = makeChild(t, 'sideChat', `Side chat: ${question.text.slice(0, 48)}`);
+      const id = chat.summary.id;
+      const turnId = 'turn_side';
+      persist(id, { type: 'user.message', origin: 'runner', text: `The blueprint "${bp.title}". The question: ${question.text}`, images: [] }, turnId);
+      persist(id, { type: 'turn.started', turnId }, turnId);
+      persist(id, { type: 'assistant.text', itemId: 'm_side', text: 'I read the snooze menu code. Hiding a passed preset and offering the next morning fits how rows already show the wake time.' }, turnId);
+      // An answer of the question's kind, as propose_answer takes it.
+      const proposal = {
+        text: 'Hide it, and show "Tomorrow morning" in its place.',
+        single: question.options?.[0]?.id,
+        multi: question.options?.slice(0, 2).map((o) => o.id),
+        number: question.min ?? 3,
+        files: ['app/Sources/Threadbear/Views/SnoozeMenu.swift'],
+      }[question.kind] ?? 'Leave it to the agent.';
+      persist(id, { type: 'tool.call', itemId: 'propose', name: 'mcp__threadbear__propose_answer', kind: 'mcp', title: 'Propose an answer', input: { answer: proposal } }, turnId);
+      persist(id, { type: 'tool.result', itemId: 'propose', ok: true, text: 'Proposed.', truncated: false, images: [] }, turnId);
+      // What the runner writes for propose_answer: the card with Use.
+      bp.proposals = { ...bp.proposals, [p.questionId]: { value: proposal } };
+      persist(id, { type: 'blueprint.proposal', blueprintId: bp.id, questionId: p.questionId, answer: { value: proposal } }, turnId);
+      persist(id, { type: 'turn.completed', turnId, outcome: 'completed', durationMs: 5000, costUsd: 0.02, needs: 'you' }, turnId);
+      chat.summary.costUsd = 0.02;
+      bp.sideChats[p.questionId] = id;
+      t.summary.costUsd = (t.summary.costUsd ?? 0) + 0.02;
+      broadcastSummary(id);
+      touchBlueprint(t);
+      return { threadId: id };
+    }
+    case 'blueprints.useProposal': {
+      const { t, bp } = needBlueprint(p.id);
+      const round = bp.rounds.find((r) => r.questions.some((q) => q.id === p.questionId));
+      if (!round) throw rpcError(-32602, 'Question not found');
+      const answer = p.answer ?? bp.proposals?.[p.questionId];
+      if (!answer) throw rpcError(-32602, 'No proposal for that question');
+      round.answers[p.questionId] = { ...answer, fromSideChat: true };
+      if (round.sentAt && !sameAnswer(round.sent?.[p.questionId], answer)) round.answers[p.questionId].changedAt = iso();
+      return { blueprint: touchBlueprint(t) };
+    }
+    case 'blueprints.check': {
+      const { t, bp } = needBlueprint(p.id);
+      if (bp.checkThreadId && threads.get(bp.checkThreadId)?.summary.status === 'running') throw rpcError(-32020, 'A check is running already');
+      const check = makeChild(t, 'check', `Check: ${bp.title}`);
+      check.summary.status = 'running';
+      bp.checkThreadId = check.summary.id;
+      broadcastSummary(check.summary.id);
+      setTimeout(() => {
+        check.summary.status = 'idle';
+        broadcastSummary(check.summary.id);
+        bp.checked = { at: iso(), findings: 0 };
+        touchBlueprint(t);
+      }, 1500);
+      touchBlueprint(t);
+      return { threadId: check.summary.id };
+    }
+    case 'blueprints.start': {
+      const found = needBlueprint(p.id);
+      const bp = found.bp ?? found.found;
+      if (!['ready', 'building', 'done'].includes(bp.status)) throw rpcError(-32020, 'The blueprint is not ready');
+      if (!['thread', 'subagents'].includes(p.mode)) throw rpcError(-32602, `Unknown mode ${p.mode}`);
+      const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
+      const now = iso();
+      const summary = {
+        id: threadId, title: `Build: ${bp.title}`, cwd: bp.folder, accountId: p.accountId ?? defaults.accountId, provider: 'claude', permissionMode: p.permissionMode ?? 'full',
+        status: 'starting', live: true, needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+        startedBy: { kind: 'blueprint', label: 'Blueprint', threadId: bp.threadId, threadTitle: bp.title },
+      };
+      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [], blueprintId: bp.id });
+      broadcastSummary(threadId);
+      setTimeout(() => fakeTurn(threadId, `Build the blueprint at ${bp.path}/spec.md.${p.mode === 'subagents' ? ' Work the steps with subagents.' : ''}`, []), 10);
+      bp.builds.push({ threadId, mode: p.mode, at: now });
+      bp.status = 'building';
+      if (found.t) touchBlueprint(found.t);
+      return { threadId };
+    }
+    case 'blueprints.diff': {
+      needBlueprint(p.id);
+      return { hunks: [{ oldStart: 12, oldLines: 3, newStart: 12, newLines: 4, lines: [' ## Steps', '-- [ ] Undo on the phone', '+- [ ] Undo on the phone, from the row\'s swipe', '+- [ ] Undo from the notification', ' - [ ] Guide and protocol'] }] };
+    }
+    case 'blueprints.tellAgent': {
+      const { t, bp } = needBlueprint(p.id);
+      const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      persist(t.summary.id, { type: 'user.message', text: 'spec.md was edited by hand. Bring answers.md into line, or ask me.', images: [] }, turnId);
+      delete bp.editedByHand;
+      touchBlueprint(t);
+      return { turnId };
+    }
+    case 'blueprints.updateSpec': {
+      const { t, bp } = needBlueprint(p.id);
+      const turnId = 'turn_' + crypto.randomBytes(4).toString('hex');
+      persist(t.summary.id, { type: 'user.message', text: 'Answers changed since the spec was written. Update the spec.', images: [] }, turnId);
+      for (const round of bp.rounds) {
+        for (const a of Object.values(round.answers)) delete a.changedAt;
+        if (round.sentAt) round.sent = JSON.parse(JSON.stringify(round.answers));
+      }
+      setTimeout(() => writeDemoSpec(t, turnId), 1000);
+      return { turnId };
+    }
+    case 'blueprints.tooSmallStart': {
+      const { t, bp } = needBlueprint(p.id);
+      const text = t.events.find((e) => e.type === 'user.message')?.text ?? bp.title;
+      const threadId = 'th_' + crypto.randomBytes(6).toString('hex');
+      const now = iso();
+      const summary = {
+        id: threadId, title: bp.title, cwd: bp.folder || t.summary.cwd, accountId: defaults.accountId, provider: 'claude', permissionMode: 'full',
+        status: 'starting', live: true, needsYou: false, createdAt: now, updatedAt: now, lastActivityAt: now, preview: '', lastSeq: 0, lastSeenSeq: 0,
+      };
+      threads.set(threadId, { summary, events: [], inProgress: new Map(), timers: [] });
+      broadcastSummary(threadId);
+      setTimeout(() => fakeTurn(threadId, text, []), 10);
+      t.summary.archivedAt = now;
+      t.summary.archivedBy = 'threadbear';
+      broadcastSummary(t.summary.id);
+      return { threadId };
+    }
+    case 'blueprints.delete': {
+      const found = needBlueprint(p.id);
+      if (found.found) { foundBlueprints = foundBlueprints.filter((b) => b.id !== p.id); return {}; }
+      const now = iso();
+      for (const t of [found.t, ...[...threads.values()].filter((c) => c.summary.parentThreadId === found.t.summary.id)]) {
+        t.summary.archivedAt = now;
+        t.summary.archivedBy = 'mike';
+        broadcastSummary(t.summary.id);
+      }
+      return {};
+    }
+  }
+}
+
 // ---------------------------------------------------------------- projects
 
 function projectRequest(method, p) {
@@ -2373,6 +2772,18 @@ function projectRequest(method, p) {
     case 'projects.update': {
       const project = needProject(p.projectId);
       for (const key of ['title', 'folders', 'goals', 'notes', 'links']) if (p[key] !== undefined) project[key] = p[key];
+      // Blueprint settings, whole: {} or null puts every default back.
+      if (p.blueprints !== undefined) {
+        const b = p.blueprints ?? {};
+        const kept = {
+          ...(typeof b.folder === 'string' && b.folder ? { folder: b.folder } : {}),
+          ...(typeof b.dir === 'string' && b.dir ? { dir: b.dir } : {}),
+          ...(typeof b.check === 'boolean' ? { check: b.check } : {}),
+        };
+        if (kept.folder && !project.folders.includes(kept.folder)) throw rpcError(-32602, 'blueprints.folder must be one of the project\'s folders');
+        if (Object.keys(kept).length) project.blueprints = kept;
+        else delete project.blueprints;
+      }
       if (p.notion !== undefined) {
         project.notion = p.notion || undefined;
         project.tasks = p.notion ? { url: p.notion, columns: [], items: [], loading: true } : undefined;
@@ -2562,7 +2973,7 @@ function addDemoProjects() {
     createdBy: 'librarian', createdByThread: 'demo_release_notes', createdAt: ago(60 * 24 * 9), updatedAt: ago(3), stateUpdatedAt: ago(41),
     // The three kinds of icon: a picture (the app's own), a symbol, and
     // Walkies with none yet, which shows its letter.
-    icon: { image: { path: fileURLToPath(new URL('../../icons/threadbear.png', import.meta.url)), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbear/app/icons/threadbear.png', by: 'librarian', updatedAt: ago(60) },
+    icon: { image: { path: demoIconPath(), mediaType: 'image/png' }, from: '/Users/mike/dev/me/threadbear/app/icons/threadbear.png', by: 'librarian', updatedAt: ago(60) },
   };
   const photo = {
     id: 'p_7a2c41f0', title: 'Photo sync', folders: ['/Users/mike/dev/photo-sync'],

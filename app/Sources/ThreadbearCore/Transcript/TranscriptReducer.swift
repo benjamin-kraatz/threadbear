@@ -118,6 +118,12 @@ public struct TranscriptModel: Sendable {
     /// The runner's loose-ends check for a done card (protocol "Loose
     /// ends"), from the thread's summary, kept here for the same reason.
     public private(set) var looseEnds: LooseEnds?
+    /// The agent's last word on a blueprint was `too_small`, and why; nil
+    /// once it puts a round (docs/protocol.md, "Blueprints").
+    public private(set) var blueprintTooSmall: String?
+    /// A side chat's newest proposed answer (`blueprint.proposal`), for
+    /// the card with Use over its composer.
+    public private(set) var blueprintProposal: BlueprintProposal?
     /// Each turn's last error row, to learn the turn's `errorKind`.
     private var errorRowForTurn: [String: String] = [:]
     private var turnStarts: [String: Date] = [:]
@@ -1011,6 +1017,17 @@ public struct TranscriptModel: Sendable {
         case .buttonUpdated:
             // No row: the reply that links it draws it (ReplyButtons).
             break
+
+        case .blueprint(let blueprint):
+            // The form draws from the summary; the transcript under it
+            // keeps a quiet line for each, so it still reads.
+            switch blueprint {
+            case .tooSmall(let why): blueprintTooSmall = why
+            case .round: blueprintTooSmall = nil
+            case .proposal(let proposal): blueprintProposal = proposal
+            default: break
+            }
+            append(TranscriptRow(id: "bp:\(seq)", seq: seq, turnId: turnId, content: .note(blueprint.line)))
 
         case .unknown:
             break

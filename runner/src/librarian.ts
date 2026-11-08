@@ -374,7 +374,10 @@ export class Librarian {
   // One job per thread: the more pressing reason and the sooner time win.
   private enqueue(threadId: string, reason: LibrarianReason, why: string, dueAtMs: number): void {
     const rec = this.host.threadRecords().find((t) => t.id === threadId);
-    if (!rec) return;
+    // A blueprint's side chat or check belongs to its blueprint, which is
+    // in the project already: filing it would cost a look and list it
+    // among the project's threads (docs/protocol.md, "Blueprints").
+    if (!rec || rec.parentThreadId) return;
     const job: LibrarianJob = { threadId, threadTitle: rec.title, reason, why, dueAt: new Date(dueAtMs).toISOString() };
     const had = this.queue.get(threadId);
     if (had) {

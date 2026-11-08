@@ -1,13 +1,13 @@
 import type { HighlightState } from './highlights.ts';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReplyButton, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, ArchivedBy, ArchiveVerdict, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef, LooseEnd } from './protocol.ts';
+import type { WaitingForRoom, Ask, AskAnswer, NeedsWho, DesignReview, ReplyButton, ReviewDraft, EffortLevel, MessageOrigin, PanelRequest, PermissionMode, ThreadShare, PersistedEvent, Provider, ArchivedBy, ArchiveVerdict, Subagent, ThreadProject, ThreadSchedule, ThreadStartedBy, ThreadStatus, ImageRef, LooseEnd, ThreadKind } from './protocol.ts';
 import { atomicWriteFileSync, readJsonSync } from './fsutil.ts';
 import { paths } from './config.ts';
 import type { WorktreeRecord } from './worktrees.ts';
 import type { WakeWhen } from './wake-when.ts';
 
-export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number };
+export type QueuedSend = { turnId: string; text: string; images: ImageRef[]; origin?: MessageOrigin; scheduleId?: string; reviewId?: string; reviewResponse?: ReviewDraft; answers?: AskAnswer[]; editOf?: number; roundId?: string };
 
 // What thread.json holds: the public summary fields plus a few internal ones.
 export type ThreadRecord = {
@@ -86,6 +86,15 @@ export type ThreadRecord = {
   // review of its own; labReviews counts the reviews since Mike last wrote.
   reviewOf?: string;
   labReviews?: number;
+  // Blueprints (docs/protocol.md, "Blueprints"). kind: a blueprint thread,
+  // or a side chat or check under one (parentThreadId, its blueprint
+  // thread). blueprintId: the blueprint it's for, on those and on a build
+  // thread (no kind), which is how update_blueprint finds it.
+  // blueprintQuestionId: a side chat's question.
+  kind?: ThreadKind;
+  parentThreadId?: string;
+  blueprintId?: string;
+  blueprintQuestionId?: string;
   // A review a draining, restarting or stopping runner couldn't start (it
   // makes no threads), for the runner that adopts or loads this one to start.
   // `seq`: where that turn's events end, which its diff is read back from.

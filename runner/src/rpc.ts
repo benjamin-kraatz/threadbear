@@ -48,6 +48,11 @@ const CLOSE_BYTES = 32 * 1024 * 1024;
 // How long close() waits for clients to finish closing before dropping them.
 const CLOSE_GRACE_MS = 1000;
 
+// Blueprint requests that send to or write in the blueprint's own thread:
+// during a handover they go where that thread is, as THREAD_METHODS do.
+// The rest make threads, which only the primary does.
+const BLUEPRINT_THREAD_METHODS = new Set(['blueprints.saveDraft', 'blueprints.continue', 'blueprints.askInstead', 'blueprints.useProposal', 'blueprints.tellAgent', 'blueprints.updateSpec']);
+
 // Requests about one thread. During a handover (docs/protocol.md) the
 // primary passes these to the draining runner that has the thread, and a
 // draining runner answers -32030 for one it has let go.
@@ -476,6 +481,10 @@ export class RpcServer {
       const browser = ['browser', 'threadbear.browser'].includes(String(p.panel).trim().toLowerCase());
       if (!this.appConnected(browser)) return { available: false };
     }
+    if (BLUEPRINT_THREAD_METHODS.has(method) && this.opts.remote) {
+      const bt = r.blueprintThreadId(p.id);
+      if (bt && !r.has(bt) && this.opts.remote.owns(bt)) return this.forward(conn, method, p, bt);
+    }
     const tid = typeof p.threadId === 'string' ? p.threadId : undefined;
     if (tid !== undefined && THREAD_METHODS.has(method) && !r.has(tid)) {
       if (this.opts.remote?.owns(tid)) return this.forward(conn, method, p, tid);
@@ -833,13 +842,13 @@ function stringArray(p: Record<string, unknown>, k: string): string[] {
 
 // Who started a new thread (docs/protocol.md, "Who started a thread"). It's
 // shown on Mike's row, so it's cut to what a row can hold, on one line.
-const STARTED_BY_KINDS = new Set(['tool', 'thread', 'schedule', 'librarian', 'runner']);
+const STARTED_BY_KINDS = new Set(['tool', 'thread', 'schedule', 'librarian', 'runner', 'blueprint']);
 function optStartedBy(p: Record<string, unknown>): { startedBy?: ThreadStartedBy } {
   const v = p.startedBy;
   if (v === undefined || v === null) return {};
   if (typeof v !== 'object') throw bad('startedBy must be an object');
   const o = v as Record<string, unknown>;
-  if (typeof o.kind !== 'string' || !STARTED_BY_KINDS.has(o.kind)) throw bad('startedBy.kind must be tool, thread, schedule, librarian or runner');
+  if (typeof o.kind !== 'string' || !STARTED_BY_KINDS.has(o.kind)) throw bad('startedBy.kind must be tool, thread, schedule, librarian, runner or blueprint');
   const words = (x: unknown, max: number) => (typeof x === 'string' ? cutSafely(x.replace(/\s+/g, ' ').trim(), max) : '');
   const label = words(o.label, 40);
   if (!label) throw bad('startedBy.label required');

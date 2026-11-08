@@ -19,6 +19,9 @@ import type { ThreadState } from '../runner.ts';
 import { checkImages, effortTitle, isClaudeModel, modelRow, modelTitle, newRuntime, oneLine, providerName, titleFrom, userMessage } from '../runner.ts';
 import { cutSafely } from '../safe-cut.ts';
 
+// What makes a thread one of a blueprint's (ThreadRecord's fields of the same names).
+export type BlueprintLink = Pick<ThreadRecord, 'kind' | 'parentThreadId' | 'blueprintId' | 'blueprintQuestionId'>;
+
 export const newThreadsPart = {
   create(this: Runner, params: {
     text: string;
@@ -39,6 +42,8 @@ export const newThreadsPart = {
     // Started by a sandboxed thread's agent in a sandbox folder: shut in
     // one too (ThreadRecord.confined).
     confined?: boolean;
+    // A blueprint's own threads (runner/blueprints.ts).
+    blueprint?: BlueprintLink;
   }): { thread: ThreadSummary; turnId: string } {
     if (!params.text && !params.images?.length) throw new RpcError(ErrorCode.badParams, 'text or images required');
     checkImages(params.images ?? []);
@@ -157,6 +162,7 @@ export const newThreadsPart = {
     worktree?: boolean;
     startedBy?: ThreadStartedBy;
     confined?: boolean;
+    blueprint?: BlueprintLink;
   }): { st: ThreadState; notes: string[] } {
     this.checkAccepting();
     // New threads belong on the new release.
@@ -216,6 +222,8 @@ export const newThreadsPart = {
     // patch files is async, so it happens there; a folder with no patch
     // files at all (most of them) starts its CLI straight away as before.
     if (params.worktree !== false && this.mayWantWorktree(cwd)) rec.worktreePending = true;
+    // Before the first turn, which reads it for its tools and instructions.
+    if (params.blueprint) Object.assign(rec, params.blueprint);
     if (params.origin === 'schedule' && params.scheduleId) rec.schedule = { id: params.scheduleId, title: params.title?.trim() || rec.title };
     const startedBy = params.origin === 'schedule' && params.scheduleId ? { kind: 'schedule' as const, label: 'Schedule' } : params.startedBy;
     if (startedBy) {

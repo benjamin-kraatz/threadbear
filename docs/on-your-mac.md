@@ -95,6 +95,18 @@ File references are where to look.
   the connection it's about to send the token over is really that runner's.
   `mac-screen.json` in the data folder
   remembers what it's said about dialogs on the screen (below).
+  `blueprints.json` in the data folder is the state of your blueprints
+  (their rounds, answers, steps and which threads built them), and
+  `blueprints/<id>/spec.snapshot.md` beside it is a copy of each spec as
+  its agent last wrote it, to tell when you've edited it by hand
+  (`runner/src/blueprints.ts`).
+  Inside your own repos it writes under `.threadbear/blueprints/<slug>/` in
+  a project's folder (the project's Blueprints settings can change where):
+  the blueprint's agent writes `spec.md` and `answers.md` there, and when
+  you use an upload answer the runner copies that file into the blueprint's
+  `attachments/` folder (`runner/src/runner/blueprints.ts`). Delete
+  blueprint removes only `spec.md`, `answers.md` and `attachments/` from
+  that folder, and the folder if nothing else is in it.
 
 Voice mode is an experiment, off by default: while it's off (`voiceMode`
 in `runner.json`'s `experiments`) there's no button, nothing below happens
@@ -245,6 +257,12 @@ started, errors), never what was said, and is started afresh past 256 KB.
   folder first turns up, when a thread has just touched a file of secrets
   (including a `.env` in a folder of its choosing), and otherwise at most
   every 5 minutes. Kept in memory, never logged, written down or sent anywhere.
+
+- The files of blueprints in your project folders: `.threadbear/blueprints/*/spec.md`
+  (to list them, and to tell when you've edited one), the optional
+  `template.md` beside them, and `~/.threadbear/blueprints/template.md` for
+  every project, when a blueprint thread starts (`runner/src/blueprints.ts`).
+  A template's text goes to the blueprint's agent as guidance.
 
 ## Who it talks to
 

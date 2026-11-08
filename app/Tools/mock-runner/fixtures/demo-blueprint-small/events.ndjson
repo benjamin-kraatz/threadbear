@@ -1,0 +1,4 @@
+{"seq":1,"ts":"2026-10-27T05:18:00.000Z","threadId":"demo_blueprint_small","turnId":"t1","type":"user.message","text":"Rename the Archive button to Put away.","images":[]}
+{"seq":2,"ts":"2026-10-27T05:18:00.000Z","threadId":"demo_blueprint_small","turnId":"t1","type":"turn.started"}
+{"seq":3,"ts":"2026-10-27T05:20:00.000Z","threadId":"demo_blueprint_small","turnId":"t1","type":"turn.completed","outcome":"completed","durationMs":9000,"costUsd":0.06,"needs":"you"}
+{"seq":4,"ts":"2026-10-27T05:20:00.000Z","threadId":"demo_blueprint_small","turnId":"t1","type":"blueprint.tooSmall","why":"It is one label in the Archive menu and the one test that reads it, about ten lines in two files."}

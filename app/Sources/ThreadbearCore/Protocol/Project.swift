@@ -103,6 +103,9 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
     /// board as the runner last read it (docs/protocol.md, "Project tasks").
     public var notion: String?
     public var tasks: ProjectTasks?
+    /// Where its blueprints live and whether a written spec is checked
+    /// (docs/protocol.md, "Blueprints"); nil is every default.
+    public var blueprints: ProjectBlueprints?
 
     public init(
         id: String, title: String, folders: [String] = [], goals: String = "", state: String = "", notes: String = "",
@@ -152,11 +155,73 @@ public struct Project: Sendable, Hashable, Decodable, Identifiable {
         lastActivityAt = date(.lastActivityAt)
         notion = string(.notion).flatMap { $0.isEmpty ? nil : $0 }
         tasks = (try? c.decodeIfPresent(ProjectTasks.self, forKey: .tasks)).flatMap { $0 }
+        blueprints = (try? c.decodeIfPresent(ProjectBlueprints.self, forKey: .blueprints)).flatMap { $0 }.flatMap { $0.isDefault ? nil : $0 }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, folders, goals, state, notes, links, createdBy, createdByThread, createdAt, updatedAt, stateUpdatedAt
-        case archived, icon, threadCount, lastActivityAt, notion, tasks
+        case archived, icon, threadCount, lastActivityAt, notion, tasks, blueprints
+    }
+}
+
+/// A project's blueprint settings: which of its folders holds them, the
+/// directory inside that folder, and whether the check runs when a spec is
+/// written. Each nil is its default.
+public struct ProjectBlueprints: Sendable, Hashable, Decodable {
+    public static let defaultDir = ".threadbear/blueprints"
+
+    public var folder: String?
+    public var dir: String?
+    public var check: Bool?
+
+    public init(folder: String? = nil, dir: String? = nil, check: Bool? = nil) {
+        self.folder = folder
+        self.dir = dir
+        self.check = check
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        folder = ((try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
+        dir = ((try? c.decodeIfPresent(String.self, forKey: .dir)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
+        check = (try? c.decodeIfPresent(Bool.self, forKey: .check)) ?? nil
+    }
+
+    enum CodingKeys: String, CodingKey { case folder, dir, check }
+
+    public var isDefault: Bool { folder == nil && dir == nil && check == nil }
+
+    /// The folder they're in: the one set if the project still has it,
+    /// else its first.
+    public static func folder(of project: Project) -> String? {
+        if let set = project.blueprints?.folder, project.folders.contains(set) { return set }
+        return project.folders.first
+    }
+
+    public static func dir(of project: Project) -> String { project.blueprints?.dir ?? defaultDir }
+    public static func checks(_ project: Project) -> Bool { project.blueprints?.check ?? true }
+
+    /// The settings with one change, each default left out: the first
+    /// folder, the default directory (or none typed) and the check on are
+    /// what the runner does anyway.
+    public static func changed(_ project: Project, folder: String?? = nil, dir: String?? = nil, check: Bool?? = nil) -> ProjectBlueprints {
+        var next = project.blueprints ?? ProjectBlueprints()
+        if let folder { next.folder = folder }
+        if let dir { next.dir = dir.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
+        if let check { next.check = check }
+        if next.folder == project.folders.first { next.folder = nil }
+        if let typed = next.dir, typed.isEmpty || typed == defaultDir { next.dir = nil }
+        if next.check == true { next.check = nil }
+        return next
+    }
+
+    /// As `projects.update` takes it: only what's set, `{}` for every default.
+    public var jsonValue: JSONValue {
+        var out: [String: JSONValue] = [:]
+        if let folder { out["folder"] = .string(folder) }
+        if let dir { out["dir"] = .string(dir) }
+        if let check { out["check"] = .bool(check) }
+        return .object(out)
     }
 }
 

@@ -1,0 +1,333 @@
+{
+  "id": "demo_blueprint",
+  "title": "Snooze presets per project",
+  "cwd": "/Users/mike/dev/me/threadbear",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": true,
+  "createdAt": "2026-10-27T04:00:00.000Z",
+  "updatedAt": "2026-10-27T04:12:00.000Z",
+  "lastActivityAt": "2026-10-27T04:12:00.000Z",
+  "preview": "Round 2 is ready: five questions on how presets behave.",
+  "kind": "blueprint",
+  "needs": "you",
+  "costUsd": 0.84,
+  "blueprint": {
+    "projectId": "p_3b1d9e20",
+    "folder": "/Users/mike/dev/me/threadbear",
+    "builds": [],
+    "sideChats": {},
+    "steps": [],
+    "createdAt": "2026-10-27T04:00:00.000Z",
+    "updatedAt": "2026-10-27T04:12:00.000Z",
+    "id": "bp_snooze",
+    "path": "/Users/mike/dev/me/threadbear/.threadbear/blueprints/snooze-presets",
+    "slug": "snooze-presets",
+    "title": "Snooze presets per project",
+    "status": "waiting",
+    "threadId": "demo_blueprint",
+    "rounds": [
+      {
+        "id": "r1",
+        "kind": "questions",
+        "title": "What a preset is",
+        "summary": "you want the snooze menu to offer times that suit each project, not one list for all of them.",
+        "questions": [
+          {
+            "id": "r1q1",
+            "text": "Is a preset a time of day, or a length of time from now?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "A time of day, like 9:00 tomorrow"
+              },
+              {
+                "id": "b",
+                "label": "A length of time, like in 2 hours"
+              },
+              {
+                "id": "c",
+                "label": "Either, per preset"
+              }
+            ]
+          },
+          {
+            "id": "r1q2",
+            "text": "Should a preset carry a name?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "Yes, like \"This evening\""
+              },
+              {
+                "id": "b",
+                "label": "No, just the time"
+              }
+            ]
+          },
+          {
+            "id": "r1q3",
+            "text": "Who edits a project's presets?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "Only you, from the project page"
+              },
+              {
+                "id": "b",
+                "label": "You, and agents through update_project"
+              }
+            ]
+          },
+          {
+            "id": "r1q4",
+            "text": "Do presets sync to the phone?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "Yes"
+              },
+              {
+                "id": "b",
+                "label": "Not yet"
+              }
+            ]
+          },
+          {
+            "id": "r1q5",
+            "text": "What happens to the global list?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "It stays, as the default"
+              },
+              {
+                "id": "b",
+                "label": "It goes"
+              }
+            ]
+          },
+          {
+            "id": "r1q6",
+            "text": "Anything a preset must never do?",
+            "kind": "text",
+            "youDecide": true
+          },
+          {
+            "id": "r1q7",
+            "text": "Should Hibernate in words learn from presets?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "a",
+                "label": "Yes"
+              },
+              {
+                "id": "b",
+                "label": "No"
+              }
+            ]
+          }
+        ],
+        "assumptions": [
+          {
+            "id": "r1a1",
+            "text": "Presets are per project, not per folder.",
+            "why": "Projects already hold the settings that differ between repos."
+          }
+        ],
+        "answers": {
+          "r1q1": {
+            "value": "c"
+          },
+          "r1q2": {
+            "value": "a"
+          },
+          "r1q3": {
+            "value": "b"
+          },
+          "r1q4": {
+            "value": "b"
+          },
+          "r1q5": {
+            "value": "a"
+          },
+          "r1q6": {
+            "value": "Never wake a thread in the middle of the night."
+          },
+          "r1q7": {
+            "youDecide": true
+          }
+        },
+        "sentAt": "2026-10-27T04:06:00.000Z",
+        "sent": {
+          "r1q1": {
+            "value": "c"
+          },
+          "r1q2": {
+            "value": "a"
+          },
+          "r1q3": {
+            "value": "b"
+          },
+          "r1q4": {
+            "value": "b"
+          },
+          "r1q5": {
+            "value": "a"
+          },
+          "r1q6": {
+            "value": "Never wake a thread in the middle of the night."
+          },
+          "r1q7": {
+            "youDecide": true
+          }
+        }
+      },
+      {
+        "id": "r2",
+        "kind": "questions",
+        "title": "How presets behave",
+        "summary": "each project keeps its own short list of snooze times, copied from the global one, and the menu hides the ones that have passed.",
+        "questions": [
+          {
+            "id": "r2q1",
+            "text": "Which presets should a new project start with?",
+            "kind": "single",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "A",
+                "label": "The global snooze list, shared by every project",
+                "note": "Changing it changes every project."
+              },
+              {
+                "id": "B",
+                "label": "A copy of the global list, kept per project",
+                "note": "Edits stay in the project they were made in."
+              },
+              {
+                "id": "C",
+                "label": "Nothing, each project adds its own"
+              }
+            ],
+            "recommended": {
+              "option": "B",
+              "why": "it matches how Archive does it"
+            }
+          },
+          {
+            "id": "r2q2",
+            "text": "Where should the presets show up?",
+            "kind": "multi",
+            "youDecide": true,
+            "other": true,
+            "options": [
+              {
+                "id": "menu",
+                "label": "The snooze menu on a thread"
+              },
+              {
+                "id": "row",
+                "label": "Right-click on a sidebar row"
+              },
+              {
+                "id": "hover",
+                "label": "A hover button on Inbox rows"
+              },
+              {
+                "id": "palette",
+                "label": "The command palette"
+              }
+            ]
+          },
+          {
+            "id": "r2q3",
+            "text": "What should a preset be called once its time has passed, like \"This evening\" at 9pm?",
+            "kind": "text",
+            "youDecide": false
+          },
+          {
+            "id": "r2q4",
+            "text": "How many presets can one project have?",
+            "kind": "number",
+            "youDecide": true,
+            "min": 1,
+            "max": 12,
+            "step": 1
+          },
+          {
+            "id": "r2q5",
+            "text": "Which files hold the snooze menu today?",
+            "kind": "files",
+            "youDecide": true,
+            "several": true
+          }
+        ],
+        "assumptions": [
+          {
+            "id": "r2a1",
+            "text": "Presets are stored in projects.json with the project.",
+            "why": "Everything else a project has lives there."
+          },
+          {
+            "id": "r2a2",
+            "text": "The menu shows at most eight presets.",
+            "why": "The current menu is eight rows tall."
+          },
+          {
+            "id": "r2a3",
+            "text": "A preset's time is in the Mac's time zone.",
+            "why": "Schedules work that way."
+          },
+          {
+            "id": "r2a4",
+            "text": "No migration: the global list stays where it is.",
+            "why": "Round 1 kept it as the default."
+          }
+        ],
+        "answers": {
+          "r2q1": {
+            "value": "B"
+          },
+          "r2q2": {
+            "value": [
+              "menu",
+              "row"
+            ]
+          },
+          "r2q3": {
+            "value": "Hide it, and show \"Tomorrow morning\" in its place. Rows keep showing the wake time.",
+            "fromSideChat": true
+          },
+          "r2q4": {
+            "value": 5
+          },
+          "r2q5": {
+            "value": [
+              "app/Sources/Threadbear/Views/SnoozeMenu.swift",
+              "runner/src/snooze.ts"
+            ]
+          }
+        }
+      }
+    ],
+    "costUsd": 0.84
+  },
+  "lastSeq": 11,
+  "lastSeenSeq": 11
+}

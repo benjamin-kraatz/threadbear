@@ -23,6 +23,10 @@ struct DetailView: View {
         let librarianHome = project == nil && app.showsLibrarianHome
         // The Scheduled page, from the activity bar's Scheduled.
         let scheduledHome = project == nil && app.showsScheduledHome
+        // "Pick a blueprint", from the activity bar's Blueprints.
+        let blueprintsHome = project == nil && app.showsBlueprintsHome
+        // A blueprint thread shows its form in place of the transcript.
+        let blueprintThread = subagentRef == nil ? thread.flatMap { $0.isBlueprint ? $0 : nil } : nil
         Group {
         if let project {
             VStack(spacing: 0) {
@@ -48,6 +52,12 @@ struct DetailView: View {
                 ErrorBanner()
                 ScheduledHome()
             }
+        } else if blueprintsHome {
+            VStack(spacing: 0) {
+                ConnectionBanner()
+                ErrorBanner()
+                BlueprintsHome()
+            }
         } else if let id = app.selection, app.dock.layout.contains(WindowDock.threadPanel(id)) {
             // One transcript can only be drawn in one place.
             OpenElsewhereNote(threadId: id)
@@ -64,6 +74,10 @@ struct DetailView: View {
                 SubagentHeader(ref: subagentRef)
             }
             ComposerPlacement(centred: isNew) {
+                if let blueprintThread {
+                    BlueprintPane(thread: blueprintThread, session: session)
+                        .layoutValue(key: PaneRole.self, value: .transcript)
+                } else {
                 ZStack {
                     TranscriptView(session: session, controller: app.transcript)
                     if let session, session.state == .loading, session.displayCount == 0 {
@@ -91,6 +105,7 @@ struct DetailView: View {
                     }
                 }
                 .layoutValue(key: PaneRole.self, value: .transcript)
+                }
                 // A sub-agent can't be written to: it takes its brief from
                 // the agent that started it.
                 if subagentRef == nil {

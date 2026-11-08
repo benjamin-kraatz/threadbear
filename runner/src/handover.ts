@@ -125,7 +125,7 @@ export type PeersDeps = {
   log: Logger;
   // Where handed-over threads go, and how the peers' notifications reach
   // this runner's clients (and its schedules and restarter).
-  runner: Pick<Runner, 'adopt' | 'publish' | 'waitedOnDeleted'>;
+  runner: Pick<Runner, 'adopt' | 'publish' | 'waitedOnDeleted'> & Partial<Pick<Runner, 'blueprintDrain'>>;
   // Usage readings from the draining runners' turns (drain.usage).
   usage?: (accountId: string, reading: UsageReading) => void;
   // Whenever what status() says changes (runner.updates, main.ts).
@@ -232,6 +232,9 @@ export class Peers {
       }
       case 'drain.usage':
         if (typeof params?.accountId === 'string' && params.reading) this.deps.usage?.(params.accountId, params.reading);
+        return;
+      case 'drain.blueprints':
+        if (params && typeof params === 'object') this.deps.runner.blueprintDrain?.(params);
         return;
       case 'thread.updated': {
         if (typeof id !== 'string' || !peer.threads.has(id)) return;
@@ -672,6 +675,36 @@ export class ThreadRouter implements ThreadControl {
   // threads.panelShown reaches through the primary.
   showPanel(threadId: string, ask: Parameters<Runner['showPanel']>[1]): ReturnType<Runner['showPanel']> {
     return this.runner.showPanel(threadId, ask);
+  }
+
+  // A blueprint's tools (runner/blueprints.ts): only that thread's own
+  // agent calls them, from its CLI here, so these never go elsewhere.
+  blueprintRole(threadId: string): ReturnType<Runner['blueprintRole']> {
+    return this.runner.blueprintRole(threadId);
+  }
+
+  askRound(...a: Parameters<Runner['askRound']>): string {
+    return this.runner.askRound(...a);
+  }
+
+  tooSmall(...a: Parameters<Runner['tooSmall']>): string {
+    return this.runner.tooSmall(...a);
+  }
+
+  blueprintWritten(...a: Parameters<Runner['blueprintWritten']>): string {
+    return this.runner.blueprintWritten(...a);
+  }
+
+  proposeAnswer(...a: Parameters<Runner['proposeAnswer']>): string {
+    return this.runner.proposeAnswer(...a);
+  }
+
+  reportCheck(...a: Parameters<Runner['reportCheck']>): string {
+    return this.runner.reportCheck(...a);
+  }
+
+  updateBlueprintStep(...a: Parameters<Runner['updateBlueprintStep']>): string {
+    return this.runner.updateBlueprintStep(...a);
   }
 
   async update(upd: Parameters<Runner['update']>[0]): Promise<ReturnType<Runner['update']>> {

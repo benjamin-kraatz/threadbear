@@ -171,6 +171,8 @@ struct AppDump: Encodable {
     /// The milestone note at the top of the thread panel: its first line.
     var milestoneNote: String?
     var error: String?
+    /// Settings > General's Show Blueprints (BlueprintsSetting).
+    var showBlueprints = true
     var window: Window?
     var sidebar: Sidebar
     var selection: Thread?
@@ -279,6 +281,18 @@ struct AppDump: Encodable {
             let built = app.projectSections
             sections = built.sections.map { Section(name: $0.project.title, threads: $0.threads.map { thread($0) }) }
                 + [Section(name: "Not in a project", threads: built.unfiled.map { thread($0) })]
+        case .blueprints:
+            // Blueprints in the thread shape: the state in words is the status.
+            let grouped = BlueprintGroup.grouped(app.allBlueprints, projectOrder: app.projects.map(\.id))
+            sections = grouped.flatMap { project in
+                project.groups.map { group in
+                    Section(name: "\(app.project(project.projectId)?.title ?? project.projectId): \(group.group.title)",
+                            threads: group.blueprints.map { blueprint in
+                                Thread(id: blueprint.threadId ?? blueprint.id, title: blueprint.title, status: BlueprintText.state(blueprint),
+                                       needsYou: group.group == .waiting, unread: false, hovered: false)
+                            })
+                }
+            }
         case .librarian:
             // Looks in the thread shape: the queue's reason, or what a look
             // did, is the status.
@@ -332,6 +346,7 @@ struct AppDump: Encodable {
             archivedNote: app.archivedNote?.threadId,
             milestoneNote: app.milestoneNote.map { ThreadMilestones.title($0.tier) },
             error: app.errorMessage,
+            showBlueprints: BlueprintsSetting.shown,
             window: window.map { Window(width: Int(contentSize($0).width), height: Int(contentSize($0).height), appearance: appearance) },
             sidebar: Sidebar(mode: String(describing: app.sidebarMode), sections: sections,
                              snoozed: ThreadSections.snoozed(app.threads.values, now: now).count, archived: app.archivedCount),
@@ -537,6 +552,7 @@ struct AppDump: Encodable {
         if let archivedNote { lines.append("archived note: \(archivedNote), with Undo") }
         if let milestoneNote { lines.append("milestone note: \(milestoneNote)") }
         if let error { lines.append("error banner: \(error)") }
+        if !showBlueprints { lines.append("blueprints hidden (Settings > General, \(BlueprintsSetting.key) off)") }
         lines.append("")
         lines.append("sidebar, \(sidebar.mode) (\(sidebar.snoozed) snoozed, \(sidebar.archived) archived):")
         // Columns as wide as the longest id: a real runner's ids are 36

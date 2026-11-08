@@ -125,7 +125,7 @@ export type SyncConfig = {
 // lower one means its backend hasn't been deployed since this runner was:
 // said in runner.status, tb status and the log rather than stopping, since
 // the runner only adds to what it sends while the number stays the same.
-export const BACKEND_API_VERSION = 60;
+export const BACKEND_API_VERSION = 61;
 // From this one sync:sharedThreads lists a runner's rows shared by link, which
 // it checks against its own threads on every start and every
 // SHARE_RECONCILE_MS (reconcileShares).
@@ -273,6 +273,11 @@ export const WAKE_NOTE_API_VERSION = 49;
 // From this one a threadIndex row carries `asked` too, for the Mac's
 // "You: ..." under another runner's threads.
 export const INDEX_ASKED_API_VERSION = 32;
+// From this one thread and threadIndex rows carry `kind` and
+// `parentThreadId` (docs/protocol.md, "Blueprints"), so the phone and other
+// Macs can leave a blueprint's side chats and checks out of their lists.
+// An older backend's validator would turn the row down, so it goes without.
+export const BLUEPRINT_KIND_API_VERSION = 61;
 // From this one the first message row of a turn the CLI started itself, as
 // background work finished, carries `wokeBy`, what finished, for the
 // phone's "6 min later · Mine the repo finished" divider. An older
@@ -373,6 +378,8 @@ export type ThreadDoc = {
   wakeNote?: string;
   woke?: { at: string; since?: string };
   startedBy?: { kind: string; label: string; icon?: string; why?: string };
+  kind?: string;
+  parentThreadId?: string;
   asked?: string;
   archivedAt?: string;
   starredAt?: string;
@@ -796,6 +803,8 @@ export function toThreadDoc(t: ThreadSummary, runnerId: string, now: number, pen
   if (t.woke) doc.woke = { ...t.woke };
   // Not the thread it came from: the phone's row has no tooltip to name it.
   if (t.startedBy) doc.startedBy = { kind: t.startedBy.kind, label: t.startedBy.label, ...(t.startedBy.icon ? { icon: t.startedBy.icon } : {}), ...(t.startedBy.why ? { why: t.startedBy.why } : {}) };
+  if (t.kind) doc.kind = t.kind;
+  if (t.parentThreadId) doc.parentThreadId = t.parentThreadId;
   if (t.asked) doc.asked = t.asked;
   if (t.archivedAt) doc.archivedAt = t.archivedAt;
   if (t.starredAt) doc.starredAt = t.starredAt;
@@ -869,7 +878,7 @@ function phoneAnswers(raw: unknown): AskAnswer[] | undefined {
 export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   const asks = d.asks !== undefined || d.asksSeq !== undefined || d.next !== undefined;
   const sections = d.needs !== undefined || d.pendingReviews !== undefined || d.waitingForRoom !== undefined;
-  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
+  if ((v >= SHARE_API_VERSION || !d.share) && (v >= WOKE_API_VERSION || !d.woke) && (v >= ASKS_API_VERSION || !asks) && (v >= SECTIONS_API_VERSION || !sections) && (v >= STARTED_BY_API_VERSION || !d.startedBy) && (v >= BLUEPRINT_KIND_API_VERSION || (!d.kind && !d.parentThreadId)) && (v >= STARS_API_VERSION || !d.starredAt) && (v >= LINKS_API_VERSION || !d.links) && (v >= ASKED_API_VERSION || !d.asked) && (v >= WAKE_NOTE_API_VERSION || !d.wakeNote) && (v >= NETWORK_WAIT_API_VERSION || !d.waitingForNetwork) && (v >= SECRETS_API_VERSION || d.pendingApproval?.kind !== 'secret') && (v >= RELAY_API_VERSION || d.pendingApproval?.seq === undefined)) return d;
   const out = { ...d };
   if (v < SECTIONS_API_VERSION) {
     delete out.needs;
@@ -885,6 +894,10 @@ export function forBackend(d: ThreadDoc, v: number, now: number): ThreadDoc {
   }
   if (v < WOKE_API_VERSION) delete out.woke;
   if (v < STARTED_BY_API_VERSION) delete out.startedBy;
+  if (v < BLUEPRINT_KIND_API_VERSION) {
+    delete out.kind;
+    delete out.parentThreadId;
+  }
   if (v < LINKS_API_VERSION) delete out.links;
   if (v < ASKED_API_VERSION) delete out.asked;
   if (v < WAKE_NOTE_API_VERSION) delete out.wakeNote;
@@ -1294,6 +1307,7 @@ export class ConvexSync {
         takesStartedBy: () => (this.backendApiVersion ?? 0) >= INDEX_STARTED_BY_API_VERSION,
         takesStars: () => (this.backendApiVersion ?? 0) >= STARS_API_VERSION,
         takesAsked: () => (this.backendApiVersion ?? 0) >= INDEX_ASKED_API_VERSION,
+        takesKind: () => (this.backendApiVersion ?? 0) >= BLUEPRINT_KIND_API_VERSION,
         takesSince: () => (this.backendApiVersion ?? 0) >= INDEX_SINCE_API_VERSION,
         takesOrder: () => (this.backendApiVersion ?? 0) >= RUNNER_ORDER_API_VERSION,
         seed: () => {

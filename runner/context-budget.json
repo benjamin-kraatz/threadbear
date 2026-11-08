@@ -1,13 +1,13 @@
 {
   "claude": {
     "instructions": 2733,
-    "tools": 35005,
-    "total": 37738
+    "tools": 35210,
+    "total": 37943
   },
   "codex": {
     "instructions": 2158,
-    "tools": 35104,
-    "total": 37262
+    "tools": 35309,
+    "total": 37467
   },
   "worktreeInstructions": 498,
   "perTool": {
@@ -34,9 +34,26 @@
     "show_options": 2143,
     "show_panel": 1299,
     "unpin": 300,
-    "update_project": 2822,
+    "update_project": 3027,
     "update_schedule": 1165,
     "update_thread": 1720,
     "wait_for_app_restart": 649
+  },
+  "blueprints": {
+    "perRole": {
+      "blueprint": 3420,
+      "sideChat": 423,
+      "check": 1439,
+      "build": 435
+    },
+    "instructions": 1246,
+    "perTool": {
+      "ask_round": 2537,
+      "blueprint_written": 615,
+      "propose_answer": 423,
+      "report_check": 1439,
+      "too_small": 268,
+      "update_blueprint": 435
+    }
   }
 }

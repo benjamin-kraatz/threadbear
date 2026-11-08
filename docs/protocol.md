@@ -230,7 +230,13 @@ type ThreadSummary = {
                         // threads finish (end_turn's waitFor); only
                         // while snoozedUntil is set
   startedBy?: { kind, label, icon?, threadId?, threadTitle?, why? } // who
-                        // started it when Mike didn't (Who started a thread)
+                        // started it when Mike didn't (Who started a thread);
+                        // kind "blueprint" for a build thread (see Blueprints)
+  kind?: "blueprint" | "sideChat" | "check" // a blueprint, or a child of
+                        // one; absent for an ordinary thread (see Blueprints)
+  parentThreadId?: string // a side chat's or check's blueprint thread; the
+                        // Inbox skips threads that have one (see Blueprints)
+  blueprint?: Blueprint // on a blueprint thread (see Blueprints)
   asked?: string        // Mike's last message to it, one line, <= 140 chars
                         // (What Mike last asked)
   woke?: { at: string, since?: string } // came back from hibernating by
@@ -439,6 +445,9 @@ type Project = {
   archived?: boolean
   icon?: ProjectIcon    // absent until the librarian has found or picked one
   threadCount: number   // threads in it, put away ones included
+  blueprints?: { folder?: string, dir?: string, check?: boolean } // where
+                        // its blueprints live and whether a written spec is
+                        // checked (see Blueprints)
   lastActivityAt?: string // its newest thread's lastActivityAt
 }
 
@@ -887,7 +896,7 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 
 | type | fields |
 |---|---|
-| `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync), and the agent then gets it after a line saying so and whether the user is at the Mac, though `text` keeps what was typed; absent for anything a person or client sent), `scheduleId?`, `editOf?: number` (the seq of the message this one replaced, see Editing a message) |
+| `user.message` | `text`, `images: ImageRef[]`, `answers?: AskAnswer[]` (the open card's asks it answers, as `threads.send` gave them: for showing, the agent only gets `text`), `origin?: "runner" \| "schedule" \| "phone"` (`runner` when the runner sent the message by itself, such as the resume after a restart; `schedule` when a schedule sent it, with `scheduleId`; `phone` when it came from the phone through the Convex mirror (Sync), and the agent then gets it after a line saying so and whether the user is at the Mac, though `text` keeps what was typed; absent for anything a person or client sent), `scheduleId?`, `editOf?: number` (the seq of the message this one replaced, see Editing a message), `roundId?` (a blueprint round's answers, see Blueprints) |
 | `assistant.text` | `itemId`, `text` (complete markdown for that block), `summary?: true` (the turn's summary, written by the runner from `end_turn`; see "Needs you"), `givesWay?: true` (on a summary, with bullet replies off: see "The summary"), `narration?: true` (Claude sent this as a narration block, whose text reaches the runner only as a short summary of what the agent wrote, not its words: see Transient events), `final?: true` (with one reply, the agent's message after `end_turn`, the turn's reply: see "Needs you", One reply). A later `assistant.text` with the same `itemId` replaces the earlier one where it stands |
 | `reasoning` | `itemId`, `text` (summary) |
 | `tool.call` | `itemId`, `name` (raw tool name), `kind` (`command` \| `read` \| `edit` \| `write` \| `search` \| `web` \| `mcp` \| `task` \| `todo` \| `image` \| `other`; `image` is image generation), `title` (one line, e.g. "npm test" or "Edit src/a.ts"), `input` (object, large strings truncated to 16 KB) |
@@ -907,6 +916,12 @@ Persisted event types (stored in `events.ndjson`, returned by `threads.events`):
 | `error` | `message` |
 | `action.run` | `actionId`, `patch`, `title`, `command`, `ok`, `exitCode?`, `text` (what it printed, truncated to 64 KB), `truncated`, `durationMs`, `trigger?` (`"turn.end"` when a hook ran it, `"worktree.setup"` for a new worktree's `setup` (see Worktrees); absent for a chip or `tb run`). A command that `actions.run` or a hook ran; outside any turn unless one was running, in which case it carries that `turnId` |
 | `thread.rewound` | `fromSeq`, `toSeq`, `files: { undone: string[], failed: { path, reason }[], how: "checkpoint" \| "diffs" \| "none" }`. Mike edited the message at `fromSeq` (see Editing a message): every event from `fromSeq` to `toSeq` (inclusive, always this event's `seq` - 1) is gone from the conversation, and clients hide them. Outside any turn. The edited message comes next, as a `user.message` with `editOf: fromSeq` |
+| `blueprint.round` | `round: Round` (without answers; the summary's `blueprint.rounds` carry them, drafts included, so the form renders from the summary): the agent put a round, or the check's findings became one (see Blueprints) |
+| `blueprint.answered` | `roundId`, `answers`, `note?`, `writeNow?`: the user's submission; the same content goes to the agent as a `user.message` with `roundId` |
+| `blueprint.tooSmall` | `why` |
+| `blueprint.written` | `steps`, `path`: the agent said the spec is written |
+| `blueprint.step` | `stepId`, `done: { at, note, threadId }`, or `all: true`. Also on the build thread's log as a `system.note` |
+| `blueprint.proposal` | `blueprintId`, `questionId`, `answer: Answer`: on a side chat's log, its `propose_answer`, drawn as a card with Use |
 
 Transient events are only sent to subscribers, never persisted, and carry
 `seq` of the last persisted event (they don't consume a number):
@@ -1003,6 +1018,20 @@ the summary and then the reply.
 | `projects.setIcon` | `{ projectId, path?: string, symbol?: string }` | `{ project: Project }`. Mike's choice: `path` a picture on this Mac (PNG, JPEG, WebP, SVG, ICNS or ICO, copied in), or `symbol` an SF Symbol name; neither puts it back to automatic, and the librarian finds one again within seconds. `-32602` for a missing file or a name that isn't a symbol's |
 | `projects.merge` | `{ projectId, intoId }` | `{ project: Project }` (the one kept). Folders and threads move over, notes are joined, and `projectId` is deleted |
 | `projects.delete` | `{ projectId }` | `{}`. Its threads leave it; nothing else is touched |
+| `blueprints.list` | `{ projectId? }` | `{ blueprints: Blueprint[] }`. Scans the projects' folders for `.threadbear/blueprints/*/spec.md` (lazily, as patches are read) and merges with the data dir's state; found ones have no `threadId` (see Blueprints) |
+| `blueprints.create` | `{ projectId?, newProject?: { title, folder }, text, images?: ImageRef[], accountId?, model? }` | `{ blueprint, thread }`. Makes the blueprint thread in the project's blueprints folder and sends `text` as its first message. `newProject` makes the project first. `-32602` without one of `projectId` or `newProject` |
+| `blueprints.saveDraft` | `{ id, roundId, answers, note? }` | `{ blueprint }`. Autosave of unsent answers; survives restarts. `-32020` while `building` or `done` (answers lock) |
+| `blueprints.continue` | `{ id, roundId, answers, note?, writeNow? }` | `{ blueprint, turnId? }`. Marks the round sent and sends the answers to the blueprint thread as one `user.message`. A round already sent: the changed answers go as a diff. Sent again with nothing changed and the same `note` and `writeNow` (a dropped reply): nothing goes, and `turnId` is the earlier message's, or absent when there was none. `-32602` when a needs-you question has no answer; `-32020` while `building` or `done` |
+| `blueprints.askInstead` | `{ id, roundId, assumptionId }` | `{ blueprint }`. Marks an assumption to be asked in the next message. `-32020` while `building` or `done` |
+| `blueprints.sideChat` | `{ id, questionId }` | `{ threadId }`. Makes the side chat, or returns the one it has |
+| `blueprints.useProposal` | `{ id, questionId, answer? }` | `{ blueprint }`. Writes a side chat's proposed answer into the draft, `fromSideChat`; without `answer`, the side chat's last proposal. For an `upload` question only paths already in the blueprint folder (`-32602` otherwise). `-32020` while `building` or `done` |
+| `blueprints.check` | `{ id }` | `{ threadId }`. Starts a check thread; `-32020` while one is running, or with no `spec.md` |
+| `blueprints.start` | `{ id, mode: "thread" \| "subagents", accountId?, model?, permissionMode? }` | `{ threadId }`. Makes the build thread, with `blueprintId` on its record so `update_blueprint` finds the blueprint; `-32020` unless `ready`, `building` or `done`, or with no `spec.md`; `-32602` for a mode it doesn't know |
+| `blueprints.diff` | `{ id }` | `{ hunks }`. The agent's snapshot against `spec.md` on disk, in the shape `edit.diff` uses |
+| `blueprints.tellAgent` | `{ id }` | `{ turnId }`. Sends the diff to the blueprint thread; `-32020` when `spec.md` is as the agent wrote it |
+| `blueprints.updateSpec` | `{ id }` | `{ turnId }`. Sends the changed answers to the blueprint thread with "update the spec"; `-32020` when nothing has changed since the spec was written, or while `building` or `done` |
+| `blueprints.tooSmallStart` | `{ id }` | `{ threadId }`. Starts a normal thread with the description, removes the blueprint's state and folder (if the agent made one) and archives the blueprint thread |
+| `blueprints.delete` | `{ id }` | `{}`. Removes `spec.md`, `answers.md` and `attachments/` from the repo, then the folder, and archives the thread and its children. `-32020`, removing nothing, when the folder has anything else in it |
 | `threads.setProjects` | `{ threadId, add?: string[], remove?: string[] }` | `{ thread: ThreadSummary }`. What Mike does by hand: an added project is pinned (adding one the thread is already in pins it, which is how "keep it here" works), a removed one is remembered so the librarian never puts the thread back in it |
 | `librarian.status` | `{}` | `{ librarian: LibrarianStatus }` |
 | `connectors.status` | `{ refresh?: boolean }` | `{ connectors: ConnectorsStatus }` (see Connectors). `refresh` asks the gateway's `/health` first, unless it did in the last 10 seconds; the app passes it when the Connectors panel opens. A runner from before Connectors answers `-32601` and the app leaves the panel out |
@@ -2113,6 +2142,7 @@ idea why it exists. `ThreadSummary.startedBy` says who did; his own threads
 | `schedule` | "Schedule" | a schedule; `ThreadSummary.schedule` has the details |
 | `librarian` | "Librarian" | the librarian's fix threads, which it no longer starts (see No fix threads); older threads keep it. `threadId` and `threadTitle` name the thread Mike said it in |
 | `runner` | "Threadbear" | a notice from the runner itself, such as a dialog left on a Mac's screen |
+| `blueprint` | "Blueprint" | a build thread started from a blueprint (see Blueprints); `threadId` and `threadTitle` name the blueprint thread |
 
 The row marks such a thread with the kind's symbol (the tool's `icon`) before
 its project or folder, which every row names, and the symbol's tooltip says
@@ -4052,6 +4082,371 @@ of the screen for it (`moved: true`) and parks it again once it closes.
 While any tab has one, the panel says so with a Show it button and lets
 Chrome keep the focus it takes. Both sides ignore fields they don't know.
 
+## Blueprints
+
+A blueprint is a feature planned by answering questions (Benjamin's design,
+8 Nov 2026). He describes a feature, an agent reads the code and puts rounds
+of questions, he answers them (or says "you decide", or opens a side chat
+about one), and when it's clear the agent writes a spec into the repo. From
+the spec he saves it for later or starts a thread, or a thread that works
+it with subagents, to build it. A blueprint is a thread (`kind:
+"blueprint"`), so it has an event log, Usage, Needs you, accounts and
+restarts like any other. `docs/blueprints-design.md` has the design; this
+section is the contract. Both sides ignore fields and events they don't know.
+
+```ts
+type BlueprintStatus = "drafting" | "waiting" | "ready" | "building" | "done"
+
+type Blueprint = {
+  id: string                 // uuid
+  projectId: string
+  folder: string             // absolute, the project folder it lives in
+  path: string               // absolute, the blueprint folder
+  slug: string
+  title: string              // blueprint_written's; before that its thread's title
+  status: BlueprintStatus
+  threadId?: string          // the blueprint thread; absent for a found one
+  rounds: Round[]
+  steps: Step[]              // from blueprint_written and update_blueprint
+  builds: { threadId: string; mode: "thread" | "subagents"; at: string }[]
+  sideChats: Record<string, string>   // questionId -> threadId
+  checkThreadId?: string
+  checked?: { at: string; findings: number }
+  editedByHand?: true        // spec.md differs from the agent's snapshot
+  specStale?: true           // answers changed after the spec was written
+  tooSmall?: { why: string; at: string }  // the agent's too_small, for its card, until it puts a round
+  costUsd: number            // thread + children
+  createdAt: string
+  updatedAt: string
+}
+
+type Round = {
+  id: string
+  kind: "questions" | "check"
+  title: string
+  summary?: string           // "what I understood so far"
+  questions: Question[]
+  assumptions: { id: string; text: string; why: string }[]
+  askInstead?: string[]      // assumption ids marked "Ask me instead"
+  answers: Record<string, Answer>   // by question id; a draft until sent
+  sent?: Record<string, Answer>     // the answers as last sent (no drafts), for "was A, now B"
+  askInstead?: string[]      // assumption ids marked "Ask me instead"
+  note?: string              // the composer's text, sent with the answers
+  sentAt?: string            // set when Continue reached the runner
+  writeNow?: true
+}
+
+type Question = {
+  id: string
+  text: string
+  kind: "single" | "multi" | "text" | "number" | "files" | "upload"
+  options?: { id: string; label: string; note?: string }[]   // single, multi
+  recommended?: { option?: string; text?: string; why: string }
+  youDecide: boolean         // default true; false means needs you
+  min?: number; max?: number; step?: number                 // number
+  several?: boolean          // files, upload: more than one
+  other?: true               // single, multi: a written "Other" beside the options
+  image?: string             // absolute path, shown above the question
+  moot?: string              // set by a later round: why it no longer applies
+}
+
+type Answer = {
+  value?: string | string[] | number   // by kind; files and upload: paths
+  other?: string             // the written Other (question has other); single's value may be absent
+  youDecide?: true
+  usedRecommendation?: true
+  fromSideChat?: true
+  changedAt?: string         // changed since the round was last sent; cleared when it's sent
+}
+
+type Step = { id: string; title: string; done?: { at: string; note: string; threadId: string } }
+```
+
+`ThreadSummary` gains `kind`, `parentThreadId` and, on a blueprint thread,
+`blueprint`. `ThreadSummary.startedBy.kind` gains `"blueprint"`, and
+`Project` gains `blueprints?` (project settings below). Each `Question`
+kind stores its answer in `Answer.value` as follows:
+
+| `kind` | `value` |
+|---|---|
+| `single` | the option id, or none with a written `other` |
+| `multi` | the option ids, with or without a written `other` |
+| `text` | a string |
+| `number` | a number |
+| `files` | paths relative to the project folder |
+| `upload` | files copied to `<blueprint>/attachments/`, paths relative to the blueprint folder: a draft or Continue may give a path on the Mac, and the runner copies it there |
+
+A question may carry an `image` shown above it, and an option a `note`, one
+line under its label. A `single` or `multi` question with `other: true` also
+takes a written answer, `Answer.other`, which the agent reads as
+"Other: <text>". A check round's answers name each finding by its first
+sentence, as the agent had the whole finding already.
+
+```ts
+// Project.blueprints, set from the project page and update_project.
+blueprints?: {
+  folder?: string   // which project folder holds them; default the first
+  dir?: string      // relative to it; default ".threadbear/blueprints"
+  check?: boolean   // run the check when a spec is written; default true
+}
+```
+
+### Rounds and answers
+
+The blueprint agent puts a round with `ask_round`, which returns at once;
+the agent ends its turn and the answers arrive as a message. Its first move
+is either a round or `too_small`. The runner stores the round and writes
+`blueprint.round`; the status is `waiting` until the answers are sent.
+`too_small` writes `blueprint.tooSmall` and the app draws a card in place
+of the form: "This looks like a small change. Start it as a normal thread?"
+with "Start a thread" (`blueprints.tooSmallStart`) and a muted "Ask me
+anyway", which sends "Ask me anyway" and obliges the agent to put a round.
+The blueprint thread is Needs you while a round is open or the card is up,
+once its turn is over.
+
+Three ways to put a question, the agent's choice per question:
+
+- Needs you (`youDecide: false`): no default. For taste and scope.
+- Open (the default): the user may press "You decide". If the agent sent a
+  `recommended` option with a `why`, "You decide" means use the
+  recommendation (`usedRecommendation`); without one, the agent chooses
+  when it reads the round.
+- Assumed: not a question but an entry in `Round.assumptions`, each with
+  its one-line `why`. `blueprints.askInstead` marks one, and it goes to the
+  agent as an open question in the next message.
+
+The agent is told: assume when the code or an earlier answer decides it,
+recommend when you have a preference, ask plainly when it's taste.
+
+Answers are drafts until sent: `blueprints.saveDraft` stores them without
+sending, and they survive restarts. Continue is `blueprints.continue`. It
+needs an answer for every needs-you question (an open question left empty
+counts as "you decide"), otherwise `-32602`. The composer's text rides
+along as `note`. From round two on, `writeNow` tells the agent to write the
+spec with what it has and treat the rest as "you decide". The runner sets
+`sentAt`, writes `blueprint.answered` and sends one `user.message` to the
+blueprint thread, carrying `roundId`.
+
+Every answer stays editable and the agent works out what a change breaks:
+
+- Before the spec is written: the answer gets `changedAt`, the next
+  Continue sends only the changes ("Question 2 was A, now B"), and the agent
+  re-checks later questions and re-asks the ones that moved. A later round
+  may set `moot` on a question that no longer applies.
+- Ready: the blueprint goes back to `drafting` with `specStale` set, and
+  the start buttons go until the agent has written the spec again.
+  `blueprints.updateSpec` sends the changed answers with "update the
+  spec". The previous spec is in git history.
+- Building or done: answers lock. The app's control becomes "Send a change
+  to the build thread", which is `threads.send` to the newest build thread
+  with the question and both answers in the text.
+
+Messages the runner writes:
+
+- A round's answers, to the blueprint agent, as the user: the round's
+  title, then each question's text and answer ("you decide" where that was
+  pressed, "unanswered" for an open question left empty, "Ask me instead:
+  <assumption>" for those), the note, and "Write the spec now with what you
+  have" when `writeNow`. A round sent before: only the changes, as
+  "Question 2 was A, now B".
+- The check's findings, as one round of kind `check`, and after the user
+  answers, to the blueprint agent with "Update the spec".
+- Edited by hand, to the blueprint agent: the hunks and "Bring answers.md
+  into line, or ask me".
+- The build thread's first message, under "Starting a build".
+
+Clients that don't know the blueprint events still see the `user.message`
+rows and the `system.note`s, so a transcript reads. State changes arrive as
+`thread.updated` with the new `blueprint` on the summary.
+
+### Side chats and the check
+
+`blueprints.sideChat` makes a side chat about one question, or returns the
+one it has: one per question, kept in `Blueprint.sideChats`. It is a real
+thread with `kind: "sideChat"`, `parentThreadId` the blueprint's,
+`permissionMode: "plan"` so it can read and not edit, in the project
+folder, on the cheaper model (runner.json's `defaults.smallModels`, by
+provider like `defaults.models`; Haiku when unset; changeable from its
+composer like any thread). Its first message is
+built by the runner: the feature description, the rounds so far in compact
+form (question, answer, or "unanswered"), the one question with its
+options, and `spec.md`'s path once the spec is written. The Inbox skips threads with a `parentThreadId`, and the
+librarian never files one into a project (its blueprint is there). A side chat or
+check is never Needs you, except for a card it's parked on; it's told not
+to make a plan, and an `ExitPlanMode` it calls anyway is turned down at
+once with a `system.note`, so no plan card waits on the user there. Thread
+and thread index rows in the backend carry `kind` and `parentThreadId`
+from backend API 61, so the phone and other Macs can leave children out;
+an older backend gets the rows without them.
+
+The side chat has `propose_answer`, which writes `blueprint.proposal` in
+its log, drawn as a card with the proposed answer and a Use button. Nothing moves without that click: Use is
+`blueprints.useProposal`, which writes the answer into the draft with
+`fromSideChat`. For an `upload` question a side chat proposes only in
+words (a path is refused), since the files are the user's to add.
+
+When the spec is written and the project has the check on (the default),
+the runner starts a check thread: a child with `kind: "check"`, on the
+cheaper model, in plan mode, told to read `spec.md` against the code and
+report contradictions and gaps with `report_check`. The runner turns the
+findings into one more round of kind `check`, with the check thread's name
+on it, and the blueprint waits for the user. The answers go to the
+blueprint agent with the findings, and it updates the spec. A check with no
+findings sets `checked` with `findings: 0`. The spec written again in
+answer to the check's round isn't checked again, so check rounds end;
+after any other rewrite (Update the spec) it is. `blueprints.check` runs it
+again by hand (`-32020` while one is running), and `Project.blueprints.check:
+false` turns the automatic one off. Once a build has started, the check's
+findings are a round to read: the blueprint stays `building` or `done` and
+its answers stay locked.
+
+`Blueprint.costUsd` is the blueprint thread's cost plus every side chat's
+and check thread's.
+
+### Files
+
+In the project folder, under `.threadbear/blueprints/<slug>/` (the
+project's `blueprints.dir` and `blueprints.folder` can change where):
+
+- `spec.md`, written by the agent for the builder, in this order: the
+  title, Overview, Decisions, Assumptions, Steps (a checklist, each step
+  with the files it expects to touch and the tests that cover it), Open
+  points. The only file a build thread is pointed at.
+- `answers.md`: every question with the answer and the choices not
+  picked, verbatim, round by round. Read only when the spec leaves
+  something unclear.
+- `attachments/`: files from `upload` answers.
+
+The runner makes the slug from the description's first line when the
+blueprint is made (whole words, at most 40 characters, never ending on a
+word like "the" or "each"), adding `-2` on a collision, and the agent's
+instructions name the folder. Round ids are `r1`, `r2`..., and the runner
+puts the round's id in front of each question and assumption id the agent
+gave (`r2.q1`), so ids are unique across the blueprint. Nothing of the
+runner's goes in the repo. Status, rounds, steps,
+which threads built it and the spec snapshot live in the data dir
+(`<home>/blueprints.json` and `<home>/blueprints/<id>/spec.snapshot.md`),
+so marking a step never dirties the working tree. Progress still reaches
+the repo as content: the build thread ticks the checkboxes in the spec's
+Steps section, and that's committed with the code.
+
+- Snapshot and edited by hand. `blueprint_written` takes a snapshot of
+  `spec.md` as the agent wrote it. When the runner next reads the blueprint
+  (lazily, as patches are: 15 seconds at most, and on `blueprints.list`) and
+  the file differs, `editedByHand` is set. Ticks in a checklist (`- [x]`
+  for `- [ ]`) don't count, and it isn't checked while the blueprint is
+  `building` or `done` (the builder ticks and edits as it goes) or while
+  its agent was asked to write the spec again and hasn't said it has.
+  `blueprints.diff` returns the
+  snapshot against the file as hunks, and `blueprints.tellAgent` sends them
+  to the blueprint thread. The snapshot moves when the agent next writes the
+  spec. No git needed.
+- Found blueprints. A `spec.md` under a project folder with no state in the
+  data dir (a clone, a blueprint from another Mac) is listed as `ready` with
+  no `threadId`. Starting a build from it works; changing answers doesn't,
+  as there are none.
+- Templates. `.threadbear/blueprints/template.md` in a project folder, and
+  `~/.threadbear/blueprints/template.md` for every project, found the way
+  patches are. The text is guidance to the agent ("always settle:
+  telemetry, settings, docs to update"), not literal questions; it's
+  appended to the blueprint thread's instructions and the agent folds it
+  into rounds where it fits.
+- Worktrees. A build thread is pointed at the spec by absolute path in the
+  project folder, so it works whether or not the spec is committed yet (a
+  worktree made from main doesn't have an uncommitted `.threadbear/`).
+- Delete. `blueprints.delete` removes the blueprint's own files from the
+  repo (`spec.md`, `answers.md`, `attachments/`) and then its folder, and
+  archives the thread and its children. A folder with anything else in it
+  is left alone (`-32020`): a `blueprints.dir` set to a folder of code
+  would otherwise find, and delete, a real one. There is no separate
+  "remove from the list": the files are the list.
+- Handovers. The state file is shared by both runners while one drains:
+  each reads it afresh when it has changed and writes one record at a time
+  under a lock (`blueprints.json.lock`). A draining runner's blueprint
+  tools send what belongs on a thread the primary has (its events, a fresh
+  summary, starting a check, as a draining runner makes no threads) to the
+  primary as a `drain.blueprints` notification. The primary passes
+  `blueprints.saveDraft`, `continue`, `askInstead`, `useProposal`,
+  `tellAgent` and `updateSpec` to the draining runner that has the
+  blueprint's thread, as it does requests that name a thread.
+
+### Starting a build
+
+`blueprints.start` makes the build thread: a normal thread in the project
+folder, in `permissionMode` as given or the thread's normal one (Plan
+first stays on the composer menu, never the default here), with `startedBy`
+`{ kind: "blueprint", label: "Blueprint", threadId: <blueprint thread id>,
+threadTitle: <title> }` and `blueprintId` on its record, which is how
+`update_blueprint` knows its blueprint. `mode` is `thread` or `subagents`;
+either is `-32020` unless the blueprint is `ready`, `building` or `done`,
+and any other mode is `-32602`. While a blueprint is `ready` the app shows
+the rounds folded (the check's among them) and the spec's steps as a
+checklist card, with the start buttons and "Check the spec" at its foot;
+the banners stay in the header. The first message, built by the runner:
+
+> Build the blueprint at `<absolute path>/spec.md`. Read `answers.md`
+> beside it only where the spec leaves something unclear. Before changing
+> anything, say in a few lines how you'll go about step one: the files
+> you'll touch and the tests you'll run. When the spec doesn't cover
+> something, ask, don't guess. Mark each step done with `update_blueprint`
+> as you finish it, with a sentence on what you did, and tick it in the
+> spec's Steps section.
+
+With `subagents`, the same message plus a paragraph telling the lead agent
+to work the steps with subagents (one per step where they're independent),
+in this one worktree, and to mark steps itself. A third mode, one thread
+per step each in its own worktree and landed in order, is not built yet.
+
+A build thread never asks for a second plan to approve: the spec is the
+plan, and the readback in its first lines is read in the transcript, not
+approved. Status flows `drafting`, then `waiting` while a round is open,
+`ready` once `blueprint_written` is called, `building` while any build
+thread is live or has steps left, and `done` when the builder marks the
+whole blueprint done or every step is done. A done blueprint stays in the
+repo until it's deleted. Each step marked is a `blueprint.step` event on
+the blueprint thread and a `system.note` on the build thread's.
+
+### Tools
+
+Given only to the threads named, and `context-budget.json` measures each.
+The one change to every thread's tools is `update_project`'s `blueprints`
+argument.
+
+- Blueprint thread: `ask_round { title, summary?, questions, assumptions?,
+  moot?: { id, why }[] }` (returns at once; the agent ends its turn; `moot`
+  sets `Question.moot` on earlier questions, by full id `r1.q2` or, where
+  it's unambiguous, the agent's own `q2`; refused while `building` or
+  `done`), `too_small { why }` and
+  `blueprint_written { title, steps: { id, title }[] }`, which checks that
+  `spec.md` and `answers.md` exist in the blueprint folder, takes the
+  snapshot, makes the blueprint `ready` and starts the check if the project
+  has it on. The thread's instructions (`briefFor`) are appended with what a
+  blueprint is, the three ways to put a question, the file layout and the
+  spec's sections, the template text if any, and the too-small rule.
+- Side chat: `propose_answer { answer }`, an `Answer.value` by the
+  question's kind; it draws the card.
+- Check thread: `report_check { findings: { text, question?: Partial<Question> }[] }`.
+  Each finding becomes a question of the check round, the runner filling
+  in a missing `id` and `text` (the finding's); a finding without a
+  `question` becomes a `text` one asking what to do.
+- Build thread: `update_blueprint { step?, note, done?: true }`. `step`
+  omitted with `done` marks the whole blueprint done.
+
+### In the app
+
+`BlueprintsList` is a sidebar mode (`sidebarMode = .blueprints`) with its
+button on the activity bar under the Librarian's, grouped by project and
+then by state: Waiting for you, Drafting, Ready, Building, Done. A
+blueprint thread's detail view is the form (`BlueprintForm`), with a toggle
+in its header to see the transcript. While a round is open the composer's
+text rides along as the note, and Return does what Continue does when it's
+enabled. A blueprint thread shows in the Inbox like any thread when it
+needs the user, as a row that opens the form; threads with a
+`parentThreadId` are skipped there and open in the pane beside the thread.
+The iPhone app shows one line and says to open it on the Mac. Every call
+under `blueprints.` changes something on the runner, so the app wraps each
+in `whileBusy` and the control shows it.
+
 ## Connectors
 
 Mike's agents get MCP services from his Connectors gateway on Bruce
@@ -5598,7 +5993,11 @@ drive Threadbear itself: `list_threads`, `read_thread`, `list_accounts`,
 and `list_projects`, `read_project`, `create_project`, `update_project`,
 `join_project` and `leave_project` (see Projects), and `pin` and
 `unpin` (see Highlights), `show_panel` (see Showing panels), and
-`wait_for_app_restart` (see App restarts).
+`wait_for_app_restart` (see App restarts). Six more, `ask_round`,
+`too_small`, `blueprint_written`, `propose_answer`, `report_check` and
+`update_blueprint`, are given only to blueprint, side chat, check and build
+threads (see Blueprints); for every other thread the one change is
+`update_project`'s `blueprints` argument.
 `list_accounts` shows each account's provider, note and room left, then
 the pools with their logins and room, and which pool a new thread starts
 on; `create_thread` and `move_thread` take Codex accounts, and

@@ -78,6 +78,7 @@ extension AppModel {
         showsProjectsHome = false
         showsLibrarianHome = false
         showsScheduledHome = false
+        showsBlueprintsHome = false
     }
 
     // MARK: Changing a project

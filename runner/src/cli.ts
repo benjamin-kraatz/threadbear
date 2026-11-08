@@ -16,6 +16,7 @@ import { land, landTargetFromGit, type LandTarget } from './worktrees.ts';
 import { activityCommand } from './activity.ts';
 import { pairCommand } from './pair.ts';
 import { runnerKeysCommand } from './runner-keys.ts';
+import { BLUEPRINT_HELP, blueprintCommand } from './tb-blueprint.ts';
 
 const OPTIONS = {
   cwd: { type: 'string' },
@@ -48,6 +49,10 @@ const OPTIONS = {
   system: { type: 'string' },
   remove: { type: 'boolean' },
   'dry-run': { type: 'boolean' },
+  // tb blueprint
+  project: { type: 'string' },
+  'write-now': { type: 'boolean' },
+  subagents: { type: 'boolean' },
   // tb-dev.ts
   last: { type: 'string' },
   tools: { type: 'boolean' },
@@ -120,6 +125,7 @@ const HELP = `tb: talk to the Threadbear runner
   tb projects [--archived] [--json]  the projects, their folders and thread counts
   tb projects show <project>      one project: goals, state, notes, threads
   tb projects add|remove <threadId> <project>   puts a thread in a project or takes it out, as the user would
+${BLUEPRINT_HELP}
   tb librarian [--json]           what the librarian is doing, its queue and what it did
   tb librarian run [<threadId>]   a look at a thread now; with none, at every recent thread it hasn't seen
   tb librarian pause|resume
@@ -185,6 +191,7 @@ const COMMAND_FLAGS: Record<string, string[]> = {
   schedule: ['at', 'cron', 'tz', 'title', 'thread', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'json'],
   schedules: ['json', 'text', 'title', 'at', 'cron', 'tz', 'cwd', 'account', 'pool', 'model', 'effort', 'ask', 'auto', 'full'],
   projects: ['json', 'archived'],
+  blueprint: ['project', 'json', 'account', 'model', 'write-now', 'text', 'subagents'],
   librarian: ['json'],
   settings: ['json'],
   models: ['json', 'remove', 'labels', 'field', 'system', 'cwd'],
@@ -678,6 +685,8 @@ async function run(client: RunnerClient, cmd: string, args: string[], f: Flags):
       }
       throw new Error(`Unknown: tb projects ${action}. It's show, add or remove.`);
     }
+    case 'blueprint':
+      return blueprintCommand(client, args, f, (q) => projectId(client, q));
     case 'librarian': {
       const [action, id] = args;
       let r: { librarian: LibrarianStatus };

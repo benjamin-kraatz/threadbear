@@ -141,6 +141,13 @@ export const approvalsPart = {
 
   requestApproval(this: Runner, st: ThreadState, gen: number, req: ToolApprovalRequest): Promise<ToolApprovalAnswer> {
     if (!this.turnForRequest(st, gen, Boolean(req.toolUseId))) return Promise.resolve({ decision: 'expired', message: 'The thread is shutting down.' });
+    // A blueprint's side chat or check reads and answers; it has no plan
+    // to approve, and a card here would wait on the user from a thread the
+    // Inbox never shows (and push to the phone). Turned down at once.
+    if (req.name === 'ExitPlanMode' && (st.rec.kind === 'sideChat' || st.rec.kind === 'check')) {
+      this.emit(st, { type: 'system.note', text: "Turned down the plan by itself: this thread only reads and answers." }, st.rt.turn?.turnId);
+      return Promise.resolve({ decision: 'deny', message: st.rec.kind === 'check' ? "Don't make a plan: this check changes nothing. Call report_check with what you found, then end your turn." : "Don't make a plan: this side chat changes nothing. Answer in a message, or call propose_answer, then end your turn." });
+    }
     const approvalId = crypto.randomUUID();
     const body: EventBody = {
       type: 'approval.requested',

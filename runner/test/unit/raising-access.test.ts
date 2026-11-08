@@ -269,6 +269,9 @@ test('ask: a project\'s brief reaching a thread with more access asks (join_proj
   assert.equal((await withCard(s, 'deny', 'update_project', { project: p.id, addFolders: ['/tmp'] })).error, true);
   // Links too: their titles are words the thread reads (Codex review, 7 Nov 2026).
   assert.equal((await withCard(s, 'deny', 'update_project', { project: p.id, addLinks: [{ title: 'Site', url: 'https://example.com' }] })).error, true);
+  // Where its blueprints go and whether they're checked: the Full thread builds from them.
+  assert.equal((await withCard(s, 'deny', 'update_project', { project: p.id, blueprints: { check: false } })).error, true);
+  assert.equal(s.projects.list()[0].blueprints, undefined);
   s.sched.stop();
 });
 

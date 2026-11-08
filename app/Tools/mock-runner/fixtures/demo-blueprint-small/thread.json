@@ -1,0 +1,41 @@
+{
+  "id": "demo_blueprint_small",
+  "title": "Rename the Archive button",
+  "cwd": "/Users/mike/dev/me/threadbear",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": true,
+  "createdAt": "2026-10-27T04:00:00.000Z",
+  "updatedAt": "2026-10-27T05:20:00.000Z",
+  "lastActivityAt": "2026-10-27T05:20:00.000Z",
+  "preview": "This looks like a small change.",
+  "kind": "blueprint",
+  "needs": "you",
+  "costUsd": 0.06,
+  "blueprint": {
+    "projectId": "p_3b1d9e20",
+    "folder": "/Users/mike/dev/me/threadbear",
+    "builds": [],
+    "sideChats": {},
+    "steps": [],
+    "createdAt": "2026-10-27T04:00:00.000Z",
+    "updatedAt": "2026-10-27T05:20:00.000Z",
+    "id": "bp_small",
+    "path": "/Users/mike/dev/me/threadbear/.threadbear/blueprints/rename-archive",
+    "slug": "rename-archive",
+    "title": "Rename the Archive button",
+    "status": "drafting",
+    "threadId": "demo_blueprint_small",
+    "rounds": [],
+    "costUsd": 0.06,
+    "tooSmall": {
+      "why": "It is one label in the Archive menu and the one test that reads it, about ten lines in two files.",
+      "at": "2026-10-27T05:20:00.000Z"
+    }
+  },
+  "lastSeq": 4,
+  "lastSeenSeq": 4
+}

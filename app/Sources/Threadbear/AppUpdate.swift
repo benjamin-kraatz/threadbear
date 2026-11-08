@@ -345,6 +345,7 @@ final class AppUpdater {
         case .scheduled: "scheduled"
         case .projects: "projects"
         case .librarian: "librarian"
+        case .blueprints: "blueprints"
         }
         return (mode, app.selection ?? "")
     }
@@ -383,6 +384,7 @@ final class AppUpdater {
             // it back on the inbox.
             case "projects": app.showProjects()
             case "librarian": app.showLibrarian()
+            case "blueprints": app.showBlueprints()
             default: app.sidebarMode = .inbox
             }
         }

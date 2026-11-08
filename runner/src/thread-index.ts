@@ -35,6 +35,8 @@ export type IndexRow = {
   archivedAt?: string;
   starredAt?: string;
   startedBy?: { kind: string; label: string; icon?: string; threadTitle?: string; why?: string };
+  kind?: string;
+  parentThreadId?: string;
   asked?: string;
 };
 
@@ -61,7 +63,7 @@ const ONLINE_MS = 3 * 60_000;
 const WATCH_CHECK_MS = 15_000;
 const UNWATCH_AFTER_MS = 2 * 60_000;
 
-export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = true, withAsked = true): IndexRow {
+export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = true, withAsked = true, withKind = true): IndexRow {
   const row: IndexRow = {
     threadId: t.id,
     title: t.title,
@@ -87,6 +89,9 @@ export function toIndexRow(t: ThreadSummary, withStartedBy = true, withStars = t
     const { kind, label, icon, threadTitle, why } = t.startedBy;
     row.startedBy = { kind, label, ...(icon ? { icon } : {}), ...(threadTitle ? { threadTitle } : {}), ...(why ? { why } : {}) };
   }
+  // A blueprint's side chat or check: the Mac leaves it out of the sidebar.
+  if (withKind && t.kind) row.kind = t.kind;
+  if (withKind && t.parentThreadId) row.parentThreadId = t.parentThreadId;
   return row;
 }
 
@@ -119,6 +124,8 @@ export class ThreadIndex {
     takesStars?: () => boolean;
     // Whether it knows `asked` (API 32).
     takesAsked?: () => boolean;
+    // Whether it knows `kind` and `parentThreadId` (API 61).
+    takesKind?: () => boolean;
     // Whether the backend can answer with only the rows changed since the
     // last answer (API 29). Without it, every re-run reads every row.
     takesSince?: () => boolean;
@@ -445,7 +452,7 @@ export class ThreadIndex {
   }
 
   private mark(t: ThreadSummary): void {
-    const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true, this.deps.takesStars?.() ?? true, this.deps.takesAsked?.() ?? true);
+    const row = toIndexRow(t, this.deps.takesStartedBy?.() ?? true, this.deps.takesStars?.() ?? true, this.deps.takesAsked?.() ?? true, this.deps.takesKind?.() ?? true);
     if (this.sent.get(t.id) === writeKey(row)) {
       this.dirty.delete(t.id);
       return;

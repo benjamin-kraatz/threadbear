@@ -43,7 +43,8 @@ struct ComposerView: View {
         let picks = thread.map { app.picks(for: $0) } ?? [:]
         // So are follow-ups ticked on a done card.
         let followUps = thread.map { app.pickedFollowUps(threadId: $0.id) } ?? FollowUpPicks()
-        let canSend = Self.canSend(draft.wrappedValue, picks: picks, followUps: followUps)
+        // While a blueprint's round is open the arrow is Continue.
+        let canSend = blueprintRoundOpen || Self.canSend(draft.wrappedValue, picks: picks, followUps: followUps)
         // A new thread on its way: what was sent stays, greyed and locked,
         // until the runner has made the thread.
         let creating = thread == nil && app.creatingThread
@@ -76,6 +77,16 @@ struct ComposerView: View {
             ComposerCard(row: cardRow, collapsed: cardCollapsed, controller: controller)
                 .padding(.horizontal, Self.padding)
                 .padding(.top, zoomed(8))
+                .padding(.bottom, zoomed(10))
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 0.5)
+        }
+        // A blueprint's side chat: its newest proposed answer, with Use.
+        if let thread, thread.kind == "sideChat", let proposal = session?.blueprintProposal {
+            BlueprintProposalCard(sideChat: thread, proposal: proposal)
+                .padding(.horizontal, Self.padding)
+                .padding(.top, zoomed(10))
                 .padding(.bottom, zoomed(10))
             Rectangle()
                 .fill(Color(nsColor: .separatorColor))
@@ -278,13 +289,29 @@ struct ComposerView: View {
     /// picked, it's the way to answer in other words.
     private func placeholder(_ picks: [Int: Int], followUps: FollowUpPicks, needsYou: Bool) -> String {
         if let thread, app.editing[thread.id] != nil { return "Your message…" }
+        // A blueprint's round is open: what's typed goes with the answers.
+        if blueprintRoundOpen { return "Add a note for the agent" }
+        if thread?.kind == "sideChat" { return "Ask about this question" }
         if !picks.isEmpty || !followUps.isEmpty { return "Add anything else…" }
         return needsYou ? "Or say something else…" : "Message"
     }
 
     /// AppModel empties the box, and puts the draft back if it isn't sent.
     /// Picked answers go with it.
+    /// A blueprint thread with a round waiting for answers: the box is the
+    /// note that goes with Continue (docs/blueprints-design.md).
+    private var blueprintRoundOpen: Bool {
+        guard let thread, thread.isBlueprint, app.editing[thread.id] == nil, let blueprint = thread.blueprint else { return false }
+        return app.blueprintForm(thread.id).rules(for: blueprint).composerTakesNote
+    }
+
     private func send() {
+        // While a round is open, Return and the send arrow do what
+        // Continue does, or put the cursor on the question still to answer.
+        if let thread, blueprintRoundOpen, app.blueprintReturn(threadId: thread.id) {
+            sends &+= 1
+            return
+        }
         // Return in an empty box comes here too, with nothing to go.
         if Self.canSend((app.drafts[draftKey] ?? Draft()).normalized,
                         picks: thread.map { app.picks(for: $0) } ?? [:],
@@ -301,6 +328,7 @@ struct ComposerView: View {
     /// Return with nothing typed sends picked answers on their own (once
     /// every ask has one, or with ⌘), or else allows the sole approval (below).
     private func returnWhenEmpty(_ draft: Draft, command: Bool) -> Bool {
+        if let thread, blueprintRoundOpen, app.blueprintReturn(threadId: thread.id) { return true }
         // An edit with only pictures left still sends; an empty one does nothing.
         if let thread, app.editing[thread.id] != nil {
             if !draft.images.isEmpty { send() }
@@ -338,6 +366,12 @@ struct ComposerView: View {
     /// a picture this Mac's runner keeps would be a path another runner
     /// hasn't got.
     private func picturesAllowed() -> Bool {
+        // The box is the note that goes with a round's answers, which is
+        // words only (blueprints.continue takes no pictures).
+        if blueprintRoundOpen {
+            app.errorMessage = "Pictures can't go with a round's answers. Add them once the agent has read the round."
+            return false
+        }
         if let name = thread.flatMap(app.runnerName(of:)) ?? (thread == nil ? app.newThreadRunner?.name : nil) {
             app.errorMessage = "Pictures can't go to \(name) from this Mac yet."
             return false

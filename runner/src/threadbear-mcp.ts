@@ -39,6 +39,8 @@ import type { SecretAnswer, SecretRequest } from './runner/approvals.ts';
 import type { StartRequest } from './cross-runner.ts';
 import { SECRET_TIMEOUT_DEFAULT_MIN, SECRET_TIMEOUT_MAX_MIN } from './secrets.ts';
 import { cutSafely, firstLineSafely } from './safe-cut.ts';
+import type { BlueprintRole } from './runner/blueprints.ts';
+import { BLUEPRINT_QUESTION_KINDS } from './protocol.ts';
 
 // What the tools drive: the Runner itself, or during a handover
 // (docs/protocol.md) a ThreadRouter (handover.ts) that reaches threads on
@@ -67,6 +69,15 @@ export type ThreadControl = {
   sandboxed?: (cwd: string) => boolean;
   // cross-runner.ts: a new thread on another runner (undefined: it's this one).
   startOn?: (threadId: string, req: StartRequest) => Promise<string | undefined>;
+  // Blueprints (runner/blueprints.ts): which of a blueprint's threads this
+  // is, and its tools' work. Only that thread's own agent calls them.
+  blueprintRole?: (threadId: string) => BlueprintRole | undefined;
+  askRound?: Runner['askRound'];
+  tooSmall?: Runner['tooSmall'];
+  blueprintWritten?: Runner['blueprintWritten'];
+  proposeAnswer?: Runner['proposeAnswer'];
+  reportCheck?: Runner['reportCheck'];
+  updateBlueprintStep?: Runner['updateBlueprintStep'];
 } & Async<Runner, 'list' | 'search' | 'get' | 'events' | 'create' | 'send' | 'update' | 'interrupt' | 'delete'>;
 
 // Messages a thread when the Mac app restarts onto a new build (app-restarts.ts).
@@ -127,7 +138,10 @@ export const ALWAYS_ASK_TOOLS = new Set([`mcp__${SERVER_NAME}__delete_thread`]);
 // Restart to Update asks only wake or file this thread, with the runner's
 // words, and the turn they start runs in its mode then, so they stay in.
 export const NEVER_ASK_TOOLS = new Set(
-  ['end_turn', 'list_threads', 'read_thread', 'list_accounts', 'list_schedules', 'list_projects', 'read_project', 'unpin', 'ask_secret', 'add_button'].map(
+  // The blueprint tools (ask_round to update_blueprint) change only
+  // Threadbear's own record of the thread's blueprint, and
+  // blueprint_written reads the files the agent wrote.
+  ['end_turn', 'list_threads', 'read_thread', 'list_accounts', 'list_schedules', 'list_projects', 'read_project', 'unpin', 'ask_secret', 'add_button', 'ask_round', 'too_small', 'blueprint_written', 'propose_answer', 'report_check', 'update_blueprint'].map(
     (n) => `mcp__${SERVER_NAME}__${n}`,
   ),
 );
@@ -215,6 +229,9 @@ export function buildThreadbearTools(
     // The replyButtons experiment (runner/buttons.ts): add_button is only
     // handed out while it's on.
     replyButtons?: () => boolean;
+    // Which of a blueprint's threads this is (runner/blueprints.ts): only
+    // that thread gets its tools. Default: the control's word on selfId.
+    blueprintRole?: () => BlueprintRole | undefined;
   } = {},
 ) {
   const codex = opts.provider === 'codex';
@@ -584,6 +601,91 @@ export function buildThreadbearTools(
       }),
     ),
   ];
+
+  // docs/protocol.md, "Blueprints": each only to the thread it's for.
+  const role = opts.blueprintRole ? opts.blueprintRole() : control.blueprintRole?.(selfId);
+  // A question as ask_round takes it. report_check's is the same with
+  // nothing required and no descriptions (the check is told in its
+  // message), as the runner fills in what's missing.
+  const questionFields = (described: boolean) => {
+    const d = <T extends z.ZodType>(t: T, text: string): T => (described ? (t.describe(text) as T) : t);
+    return {
+      id: d(z.string().min(1).max(60), 'Unique in the round: q1, q2.'),
+      text: z.string().min(1).max(4000),
+      kind: d(z.enum(BLUEPRINT_QUESTION_KINDS as unknown as [string, ...string[]]).optional(), 'Default single with options, else text. files: paths in the project; upload: a file from their Mac.'),
+      options: d(z.array(z.object({ id: z.string().min(1).max(60), label: z.string().min(1).max(300), note: z.string().max(300).optional() })).max(12).optional(), 'single, multi.'),
+      recommended: d(z.object({ option: z.string().optional(), text: z.string().optional(), why: z.string().min(1).max(300) }).optional(), 'Your pick and why; "you decide" then means it.'),
+      youDecide: d(z.boolean().optional(), 'false: only the user can answer (taste, scope). Default true.'),
+      min: z.number().optional(),
+      max: z.number().optional(),
+      step: z.number().optional(),
+      several: d(z.boolean().optional(), 'files, upload: more than one.'),
+      other: d(z.boolean().optional(), 'single, multi: a written Other too.'),
+      image: d(z.string().optional(), 'A picture to show above it.'),
+    };
+  };
+  const question = z.object(questionFields(true));
+  const needs = <K extends keyof ThreadControl>(k: K): NonNullable<ThreadControl[K]> => {
+    const fn = control[k];
+    if (!fn) throw new Error("This runner can't do blueprints.");
+    return fn as NonNullable<ThreadControl[K]>;
+  };
+  const blueprintTools =
+    role === 'blueprint'
+      ? [
+          tool(
+            'ask_round',
+            'Puts a round of questions in the blueprint form.',
+            {
+              title: z.string().min(1).max(200),
+              summary: z.string().max(4000).optional().describe('What you understood so far, a line or two.'),
+              questions: z.array(question).max(8),
+              assumptions: z.array(z.object({ id: z.string().max(60).optional(), text: z.string().min(1).max(4000), why: z.string().min(1).max(300) })).max(20).optional().describe('What you took as settled, each with why. The user can ask for one to be asked instead.'),
+              moot: z.array(z.object({ id: z.string().min(1).max(80), why: z.string().min(1).max(300) })).max(20).optional().describe('Earlier questions an answer has made moot, by id (r1.q2).'),
+            },
+            handle(async (args) => needs('askRound').call(control, selfId, args)),
+          ),
+          tool(
+            'too_small',
+            'Instead of a first round: tells the user this is small enough for a normal thread.',
+            { why: z.string().min(1).max(500) },
+            handle(async ({ why }) => needs('tooSmall').call(control, selfId, why)),
+          ),
+          tool(
+            'blueprint_written',
+            "Call once spec.md and answers.md are written in the blueprint's folder: the blueprint is then ready to build.",
+            { title: z.string().min(1).max(200), steps: z.array(z.object({ id: z.string().min(1).max(60), title: z.string().min(1).max(300) })).min(1).max(60).describe("The spec's Steps, in order.") },
+            handle(async (args) => needs('blueprintWritten').call(control, selfId, args)),
+          ),
+        ]
+      : role === 'sideChat'
+        ? [
+            tool(
+              'propose_answer',
+              "Proposes an answer to this side chat's question. The user presses Use to put it in the form.",
+              { answer: z.union([z.string(), z.array(z.string()), z.number()]).describe("By the question's kind: an option id, option ids, text, a number or paths.") },
+              handle(async ({ answer }) => needs('proposeAnswer').call(control, selfId, answer)),
+            ),
+          ]
+        : role === 'check'
+          ? [
+              tool(
+                'report_check',
+                "Reports the check's findings, once. Each becomes a question for the user, whose answers go to the blueprint's agent. Empty when nothing was found.",
+                { findings: z.array(z.object({ text: z.string().min(1).max(4000), question: z.object(questionFields(false)).partial().nullable().optional() })).max(8) },
+                handle(async ({ findings }) => needs('reportCheck').call(control, selfId, findings)),
+              ),
+            ]
+          : role === 'build'
+            ? [
+                tool(
+                  'update_blueprint',
+                  "Marks a step of the blueprint this thread builds done, with a sentence on what you did. done: true with no step marks the whole blueprint done.",
+                  { step: z.union([z.string(), z.number()]).optional().describe('Its id or number.'), note: z.string().min(1).max(1000), done: z.boolean().optional() },
+                  handle(async (args) => needs('updateBlueprintStep').call(control, selfId, args)),
+                ),
+              ]
+            : [];
 
   // docs/protocol.md, "Reply buttons".
   const buttonTools = opts.replyButtons?.() === true && control.createButton
@@ -1089,8 +1191,12 @@ export function buildThreadbearTools(
           .describe(
             "A Notion page (or database) with the project's task board on it: a database with a Status column (To do, Doing, Waiting, Done), Who, Due and Thread (the thread id working on it). The project page shows the board, read every few minutes. Empty takes it off.",
           ),
+        blueprints: z
+          .object({ folder: z.string().optional(), dir: z.string().optional(), check: z.boolean().optional() })
+          .optional()
+          .describe('Where its blueprints go; {} resets.'),
       },
-      handle(async ({ project: q, title, mikeAsked, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion }, extra) => {
+      handle(async ({ project: q, title, mikeAsked, goals, state, notes, appendNote, links, addLinks, removeLinks, addFolders, removeFolders, icon, notion, blueprints }, extra) => {
         const pc = mustProjects();
         const p = await project(q);
         // Raising access (above): the brief its threads are told (title,
@@ -1101,7 +1207,7 @@ export function buildThreadbearTools(
         // the brief tells them to keep it moving.
         const caller = await restricted();
         const added = addFolders?.length ? await Promise.all(addFolders.map(folder)) : undefined;
-        if (caller && ([title, goals, state, notes, appendNote, notion, links].some((x) => x !== undefined) || addFolders?.length || addLinks?.length)) {
+        if (caller && ([title, goals, state, notes, appendNote, notion, links, blueprints].some((x) => x !== undefined) || addFolders?.length || addLinks?.length)) {
           const listed = (await pc.get(p.id)).threadIds;
           const threadIds = [...new Set([...listed, ...(await all()).filter((t) => t.projects?.some((m) => m.id === p.id)).map((t) => t.id)])];
           let top: { mode: PermissionMode; confined: boolean; title: string } | undefined;
@@ -1111,7 +1217,7 @@ export function buildThreadbearTools(
             if (above(t, caller) && (!top || raises(t.mode, top.mode))) top = t;
           }
           if (top) {
-            const fields = Object.fromEntries(Object.entries({ title, goals, state, notes, appendNote, addFolders: added, notion, links, addLinks }).filter(([, v]) => v !== undefined));
+            const fields = Object.fromEntries(Object.entries({ title, goals, state, notes, appendNote, addFolders: added, notion, links, addLinks, blueprints }).filter(([, v]) => v !== undefined));
             await confirm('update_project', [`Change the brief of the project "${p.title}", which "${top.title}" (${accessName(top, caller)}) is told`], { project: p.id, ...fields }, extra?.signal);
             if (addFolders?.length) for (const [i, f] of addFolders.entries()) await sameFolder(f, added![i]!);
           }
@@ -1122,7 +1228,7 @@ export function buildThreadbearTools(
           const add = added ?? [];
           folders = [...p.folders.filter((f) => !drop.has(f)), ...add.filter((f) => !p.folders.includes(f))];
         }
-        let out = await pc.update(p.id, { title, goals, state, notes, links, folders, notion, by: mikeAsked ? 'mike' : 'agent' });
+        let out = await pc.update(p.id, { title, goals, state, notes, links, folders, notion, ...(blueprints !== undefined ? { blueprints } : {}), by: mikeAsked ? 'mike' : 'agent' });
         if (appendNote?.trim()) out = await pc.appendNote(p.id, appendNote);
         if (addLinks?.length || removeLinks?.length) {
           if (!pc.addLinks || !pc.removeLinks) throw new Error("This runner can't change project links yet.");
@@ -1515,6 +1621,7 @@ export function buildThreadbearTools(
         ]
       : []),
     ...reviewTools,
+    ...blueprintTools,
     ...buttonTools,
     ...highlightTools,
     ...secretTools,

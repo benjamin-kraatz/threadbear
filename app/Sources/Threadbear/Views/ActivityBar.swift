@@ -18,6 +18,8 @@ struct ActivityBar: View {
     @Environment(\.openSettings) private var openSettings
     /// The highlight behind the view on show slides between icons in this.
     @Namespace private var activeSpace
+    /// Settings > General's Show Blueprints.
+    @AppStorage(BlueprintsSetting.key) private var showBlueprints = true
     static var width: CGFloat { zoomed(44) }
 
     var body: some View {
@@ -53,6 +55,14 @@ struct ActivityBar: View {
                 ActivityButton(symbol: "books.vertical", title: "Librarian", shortcut: AppShortcuts.shared.display(.showLibrarian),
                                badge: app.librarian?.pendingCount, active: app.sidebarMode == .librarian, slides: true) {
                     app.showLibrarian()
+                }
+                // Blueprints: features planned by answering questions. A
+                // count of those waiting on Mike.
+                if !app.blueprintsUnsupported, showBlueprints {
+                    ActivityButton(symbol: "list.bullet.rectangle", title: "Blueprints", tip: "Blueprints: plan a feature by answering questions",
+                                   badge: app.blueprintsWaiting, active: app.sidebarMode == .blueprints, slides: true) {
+                        app.showBlueprints()
+                    }
                 }
             }
             }

@@ -93,6 +93,7 @@ private struct GeneralSettings: View {
     @AppStorage(CompletionSound.enabledKey) private var dingOn = false
     @AppStorage(CompletionSound.dingKey) private var ding = CompletionSound.Ding.chime.rawValue
     @AppStorage(CompletionSound.volumeKey) private var dingVolume = CompletionSound.defaultVolume
+    @AppStorage(BlueprintsSetting.key) private var showBlueprints = true
 
     var body: some View {
         if app.runnerSettings == nil {
@@ -124,6 +125,16 @@ private struct GeneralSettings: View {
             }
             .tip("Light or dark for Threadbear, whatever the Mac is set to")
             .onChange(of: appearance) { _, new in new.apply() }
+        }
+
+        SettingsSection("Blueprints",
+                        about: "Plan a feature by answering an agent's questions, then build it from the spec it writes. Off hides the button on the left; a blueprint you open from the Inbox still shows its form.",
+                        ask: "explain how blueprints work.") {
+            Toggle("Show Blueprints", isOn: $showBlueprints)
+                .tip("The Blueprints button on the left of the window")
+                .onChange(of: showBlueprints) { _, on in
+                    if !on, app.sidebarMode == .blueprints { app.sidebarMode = .inbox }
+                }
         }
 
         SettingsSection("Notifications",

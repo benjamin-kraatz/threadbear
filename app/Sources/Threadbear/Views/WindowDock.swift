@@ -94,6 +94,7 @@ enum WindowDock {
             if app.showsProjectsHome { return "Projects" }
             if app.showsLibrarianHome { return "Librarian" }
             if app.showsScheduledHome { return "Scheduled" }
+            if app.showsBlueprintsHome { return "Blueprints" }
             guard let thread = app.selectedThread else { return "New thread" }
             return thread.title.isEmpty ? "Untitled" : thread.title
         case usage: return "Usage"

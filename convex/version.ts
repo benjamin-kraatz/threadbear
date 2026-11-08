@@ -272,4 +272,8 @@
 //    runner key can't save a schedule under an id gone from another runner
 //    within the day (scheduleGone). An older runner never asks, and does
 //    as before.
-export const API_VERSION = 60;
+// 61: thread and threadIndex rows can carry `kind` ("blueprint", "sideChat",
+//    "check") and `parentThreadId`, so the phone and other Macs can leave a
+//    blueprint's side chats and checks out of their lists (docs/protocol.md,
+//    "Blueprints"). A runner sends them only to a backend of 61 or later.
+export const API_VERSION = 61;

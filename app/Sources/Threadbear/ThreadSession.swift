@@ -79,6 +79,9 @@ final class ThreadSession {
     /// The open card (TranscriptModel.openCard), observed, so the composer
     /// it's drawn in follows its picks and notes and drops it once it closes.
     private(set) var openCard: TranscriptRow?
+    /// A blueprint side chat's newest proposed answer, observed, for the
+    /// card with Use over its composer (TranscriptModel.blueprintProposal).
+    private(set) var blueprintProposal: BlueprintProposal?
     /// Observed by recovery controls outside the AppKit transcript. The
     /// rows themselves aren't observed, so a refusal arriving after its
     /// thread summary must still redraw the offer.
@@ -566,6 +569,8 @@ final class ThreadSession {
         } else if latestCompletion != nil {
             latestCompletion = nil
         }
+        let proposal = feed.model.blueprintProposal
+        if proposal != blueprintProposal { blueprintProposal = proposal }
         let card = feed.model.openCard
         guard card != openCard else { return }
         // A card turning up as he watches, rather than one that was there

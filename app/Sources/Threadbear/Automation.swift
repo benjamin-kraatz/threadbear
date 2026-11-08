@@ -215,10 +215,18 @@ enum Automation {
             guard window.attachedSheet != nil else { return "error the pairing code didn't open: \(app.devicesError ?? "no error")" }
             try? await Task.sleep(for: .milliseconds(300))
         }
+        // {"showBlueprints": false}: General's Show Blueprints, as its
+        // toggle sets it.
+        if let show = c["showBlueprints"] as? Bool {
+            UserDefaults.standard.set(show, forKey: BlueprintsSetting.key)
+            if !show, app.sidebarMode == .blueprints { app.sidebarMode = .inbox }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
         let shown: String
         if let settings = app.runnerSettings {
             shown = json([
                 "tab": app.settingsTab.rawValue,
+                "showBlueprints": BlueprintsSetting.shown,
                 "defaultCwd": settings.defaultCwd,
                 "idleMinutes": settings.idleMinutes,
                 "maxLiveCLIs": settings.maxLiveCLIs,
@@ -240,7 +248,7 @@ enum Automation {
                 "pairingShown": SettingsWindow.current?.attachedSheet != nil,
             ] as [String: Any])
         } else {
-            shown = json(["tab": app.settingsTab.rawValue, "unsupported": app.settingsUnsupported] as [String: Any])
+            shown = json(["tab": app.settingsTab.rawValue, "unsupported": app.settingsUnsupported, "showBlueprints": BlueprintsSetting.shown] as [String: Any])
         }
         return "ok \(window.windowNumber) " + shown
     }
@@ -952,6 +960,9 @@ enum Automation {
             case "librarian":
                 guard app.projectsSupported else { return "error this runner has no projects" }
                 app.showLibrarian()
+            case "blueprints":
+                guard app.projectsSupported else { return "error this runner has no projects" }
+                app.showBlueprints()
             default: app.sidebarMode = .inbox
             }
             // "time": true says how long the switch held up the main thread,

@@ -527,6 +527,8 @@ public enum EventPayload: Sendable, Hashable {
     /// `inProgress`. Replaces the row's streaming text (deltas append). Made
     /// by the app, never sent by the runner as an event.
     case streamingText(itemId: String, isReasoning: Bool, text: String)
+    /// One of the `blueprint.*` events (docs/protocol.md, "Blueprints").
+    case blueprint(BlueprintEvent)
     /// An event type this app doesn't know yet. Ignored by the reducer.
     case unknown
 }
@@ -701,6 +703,9 @@ public struct Event: Sendable, Hashable, Decodable {
             let fields = try text()
             return .toolOutputDelta(itemId: fields.itemId ?? "", text: fields.text ?? "")
         default:
+            if type.hasPrefix("blueprint."), let event = try BlueprintEvent.decode(type: type, from: decoder) {
+                return .blueprint(event)
+            }
             return .unknown
         }
     }

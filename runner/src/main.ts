@@ -23,6 +23,7 @@ import { KeepAwake } from './keep-awake.ts';
 import { experimentOn } from './experiments.ts';
 import { MacScreen } from './mac-screen.ts';
 import { Projects, drainProjectMethods, projectMethods } from './projects.ts';
+import { blueprintMethods } from './runner/blueprints.ts';
 import { Librarian, librarianMethods } from './librarian.ts';
 import { ConnectorsMonitor, connectorsMethods } from './connectors.ts';
 import { TaskBoards, gatewayCaller, helperHeaders } from './notion-tasks.ts';
@@ -292,6 +293,10 @@ async function main(): Promise<void> {
       // A thread here may be waiting on one deleted over there.
       waitedOnDeleted: (threadId) => runner.waitedOnDeleted(threadId),
       publish: (n) => runner.publish(n),
+      // A draining runner's blueprint tools (runner/blueprints.ts).
+      blueprintDrain: (params) => {
+        if (!draining) runner.blueprintDrain(params);
+      },
     },
     usage: (accountId, reading) => usage.record(accountId, reading),
     onChange: () => publishUpdates(),
@@ -593,7 +598,7 @@ async function main(): Promise<void> {
   updaterReady = true;
 
   runner.attachClis(updates);
-  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }) };
+  const methods = { ...restartMethods(restarter), ...scheduleMethods(scheduler), ...projectMethods(projects), ...blueprintMethods(runner), ...drainProjectMethods(projects), ...librarianMethods(librarian), ...connectorsMethods(connectors), ...settingsMethods(settings), ...instructionsMethods(instructions), ...modelMethods(models), ...devicesMethods(sync), ...usageStatsMethods({ tally, history: usageHistory, clock: realClock }) };
   // runner.status carries the CLI statuses too (protocol, "runner.status").
   const restartStatus = methods['runner.status'];
   methods['runner.status'] = (p) => {
@@ -863,6 +868,8 @@ async function main(): Promise<void> {
             return {};
           },
           'runner.status': (p) => ({ ...(restartStatus(p) as Record<string, unknown>), draining: true, keeping: runner.keeping() }),
+          // The primary passes on a blueprint's requests while its thread is kept here (rpc.ts).
+          ...blueprintMethods(runner),
         },
       });
       const { port: drainPort } = await drainServer.listen();

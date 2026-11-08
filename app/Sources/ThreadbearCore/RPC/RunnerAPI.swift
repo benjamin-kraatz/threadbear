@@ -847,8 +847,13 @@ public struct ProjectUpdate: Sendable, Hashable {
     public var archived: Bool?
     /// A Notion page with the project's task board; empty takes it off.
     public var notion: String?
+    /// Its blueprint settings, whole: what's left out is the default, and
+    /// one with nothing set puts them all back.
+    public var blueprints: ProjectBlueprints?
 
-    public init(title: String? = nil, folders: [String]? = nil, goals: String? = nil, state: String? = nil, notes: String? = nil, archived: Bool? = nil, notion: String? = nil) {
+    public init(title: String? = nil, folders: [String]? = nil, goals: String? = nil, state: String? = nil, notes: String? = nil, archived: Bool? = nil, notion: String? = nil,
+                blueprints: ProjectBlueprints? = nil) {
+        self.blueprints = blueprints
         self.title = title
         self.folders = folders
         self.goals = goals
@@ -867,6 +872,7 @@ public struct ProjectUpdate: Sendable, Hashable {
         if let notes { params["notes"] = .string(notes) }
         if let archived { params["archived"] = .bool(archived) }
         if let notion { params["notion"] = .string(notion) }
+        if let blueprints { params["blueprints"] = blueprints.jsonValue }
         return params
     }
 
@@ -890,6 +896,7 @@ public struct ProjectUpdate: Sendable, Hashable {
             if link != project.notion { project.tasks = nil }
             project.notion = link
         }
+        if let blueprints { project.blueprints = blueprints.isDefault ? nil : blueprints }
         return project
     }
 }
@@ -1004,4 +1011,175 @@ public enum SecretAnswer: Sendable, CustomStringConvertible, CustomDebugStringCo
     public static func canSave(_ typed: String) -> Bool {
         !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+}
+
+// MARK: Blueprints (docs/protocol.md, "Blueprints")
+
+/// Every call under `blueprints.` but the list changes something on the
+/// runner, so the app wraps each in `whileBusy` (EveryClickShowsTests).
+public extension RPCClient {
+    /// Every blueprint the runner knows of, the found ones too (no thread).
+    func listBlueprints(projectId: String? = nil) async throws -> [Blueprint] {
+        var params: [String: JSONValue] = [:]
+        if let projectId { params["projectId"] = .string(projectId) }
+        return try await call("blueprints.list", .object(params), as: BlueprintsResult.self).blueprints
+    }
+
+    /// A new blueprint in a project, or in a new one (`newProject`).
+    func createBlueprint(_ request: NewBlueprintRequest) async throws -> BlueprintCreated {
+        try await call("blueprints.create", .object(request.params), as: BlueprintCreated.self, timeout: RPCClient.sendTimeout)
+    }
+
+    /// Autosave of a round's unsent (or changed) answers.
+    func saveBlueprintDraft(id: String, roundId: String, answers: [String: BlueprintAnswer], note: String? = nil) async throws -> Blueprint? {
+        var params: [String: JSONValue] = ["id": .string(id), "roundId": .string(roundId), "answers": BlueprintAnswer.json(answers)]
+        if let note { params["note"] = .string(note) }
+        return try await call("blueprints.saveDraft", .object(params), as: BlueprintReply.self).blueprint
+    }
+
+    /// Sends a round's answers (or a sent round's changes) to the agent.
+    func continueBlueprint(id: String, roundId: String, answers: [String: BlueprintAnswer], note: String? = nil, writeNow: Bool = false) async throws -> Blueprint? {
+        var params: [String: JSONValue] = ["id": .string(id), "roundId": .string(roundId), "answers": BlueprintAnswer.json(answers)]
+        if let note, !note.isEmpty { params["note"] = .string(note) }
+        if writeNow { params["writeNow"] = .bool(true) }
+        return try await call("blueprints.continue", .object(params), as: BlueprintReply.self, timeout: RPCClient.sendTimeout).blueprint
+    }
+
+    /// Marks an assumption to be asked as a question in the next message.
+    func askInstead(blueprintId: String, roundId: String, assumptionId: String) async throws -> Blueprint? {
+        try await call("blueprints.askInstead", .object(["id": .string(blueprintId), "roundId": .string(roundId), "assumptionId": .string(assumptionId)]),
+                       as: BlueprintReply.self).blueprint
+    }
+
+    /// The side chat about one question, made the first time.
+    func blueprintSideChat(id: String, questionId: String) async throws -> String {
+        try await call("blueprints.sideChat", .object(["id": .string(id), "questionId": .string(questionId)]), as: BlueprintThreadReply.self,
+                       timeout: RPCClient.sendTimeout).threadId
+    }
+
+    /// Writes a side chat's proposed answer into the draft.
+    func useBlueprintProposal(id: String, questionId: String, answer: BlueprintAnswer) async throws -> Blueprint? {
+        try await call("blueprints.useProposal", .object(["id": .string(id), "questionId": .string(questionId), "answer": answer.jsonValue]),
+                       as: BlueprintReply.self).blueprint
+    }
+
+    /// Reads the spec against the code again.
+    func checkBlueprint(id: String) async throws -> String {
+        try await call("blueprints.check", .object(["id": .string(id)]), as: BlueprintThreadReply.self, timeout: RPCClient.sendTimeout).threadId
+    }
+
+    /// A build thread from the spec; `mode` is "thread" or "subagents".
+    func startBlueprint(id: String, mode: String, accountId: String? = nil, model: String? = nil, permissionMode: PermissionMode? = nil) async throws -> String {
+        var params: [String: JSONValue] = ["id": .string(id), "mode": .string(mode)]
+        if let accountId { params["accountId"] = .string(accountId) }
+        if let model { params["model"] = .string(model) }
+        if let permissionMode { params["permissionMode"] = .string(permissionMode.rawValue) }
+        return try await call("blueprints.start", .object(params), as: BlueprintThreadReply.self, timeout: RPCClient.sendTimeout).threadId
+    }
+
+    /// The agent's last spec against spec.md on disk.
+    func blueprintDiff(id: String) async throws -> [DiffHunk] {
+        try await call("blueprints.diff", .object(["id": .string(id)]), as: BlueprintDiffReply.self).hunks
+    }
+
+    /// Sends the hand edits to the blueprint thread.
+    func tellBlueprintAgent(id: String) async throws {
+        _ = try await call("blueprints.tellAgent", .object(["id": .string(id)]), as: TurnResult.self, timeout: RPCClient.sendTimeout)
+    }
+
+    /// Sends the answers changed since the spec was written, to update it.
+    func updateBlueprintSpec(id: String) async throws {
+        _ = try await call("blueprints.updateSpec", .object(["id": .string(id)]), as: TurnResult.self, timeout: RPCClient.sendTimeout)
+    }
+
+    /// Too small: a normal thread with the description instead.
+    func tooSmallStart(id: String) async throws -> String {
+        try await call("blueprints.tooSmallStart", .object(["id": .string(id)]), as: BlueprintThreadReply.self, timeout: RPCClient.sendTimeout).threadId
+    }
+
+    /// Removes the blueprint's folder and archives its thread and children.
+    func deleteBlueprint(id: String) async throws {
+        _ = try await call("blueprints.delete", .object(["id": .string(id)]), as: JSONValue.self)
+    }
+}
+
+/// `blueprints.create`'s params: a project, or a new one made first.
+public struct NewBlueprintRequest: Sendable {
+    public var projectId: String?
+    public var newProject: (title: String, folder: String)?
+    public var text: String
+    public var images: [ImageRef]
+    public var accountId: String?
+    public var model: String?
+
+    public init(projectId: String? = nil, newProject: (title: String, folder: String)? = nil, text: String, images: [ImageRef] = [],
+                accountId: String? = nil, model: String? = nil) {
+        self.projectId = projectId
+        self.newProject = newProject
+        self.text = text
+        self.images = images
+        self.accountId = accountId
+        self.model = model
+    }
+
+    public var params: [String: JSONValue] {
+        var params: [String: JSONValue] = ["text": .string(text)]
+        if let projectId { params["projectId"] = .string(projectId) }
+        if let newProject { params["newProject"] = .object(["title": .string(newProject.title), "folder": .string(newProject.folder)]) }
+        if !images.isEmpty { params["images"] = .array(images.map(\.jsonValue)) }
+        if let accountId { params["accountId"] = .string(accountId) }
+        if let model { params["model"] = .string(model) }
+        return params
+    }
+}
+
+public struct BlueprintCreated: Sendable, Decodable {
+    public var blueprint: Blueprint?
+    public var thread: ThreadSummary?
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        blueprint = (try? c.decodeIfPresent(Blueprint.self, forKey: .blueprint)) ?? nil
+        thread = (try? c.decodeIfPresent(ThreadSummary.self, forKey: .thread)) ?? nil
+    }
+
+    enum CodingKeys: String, CodingKey { case blueprint, thread }
+}
+
+struct BlueprintsResult: Sendable, Decodable {
+    var blueprints: [Blueprint]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        blueprints = c.lossyArray(Blueprint.self, forKey: .blueprints)
+    }
+
+    enum CodingKeys: String, CodingKey { case blueprints }
+}
+
+/// A reply carrying the blueprint as it is now; nil when it couldn't be read.
+struct BlueprintReply: Sendable, Decodable {
+    var blueprint: Blueprint?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        blueprint = (try? c.decodeIfPresent(Blueprint.self, forKey: .blueprint)) ?? nil
+    }
+
+    enum CodingKeys: String, CodingKey { case blueprint }
+}
+
+struct BlueprintThreadReply: Sendable, Decodable {
+    var threadId: String
+}
+
+struct BlueprintDiffReply: Sendable, Decodable {
+    var hunks: [DiffHunk]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hunks = c.lossyArray(DiffHunk.self, forKey: .hunks)
+    }
+
+    enum CodingKeys: String, CodingKey { case hunks }
 }

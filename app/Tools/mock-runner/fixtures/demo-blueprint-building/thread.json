@@ -1,0 +1,133 @@
+{
+  "id": "demo_blueprint_building",
+  "title": "Archive with undo",
+  "cwd": "/Users/mike/dev/me/threadbear",
+  "accountId": "claude-main",
+  "provider": "claude",
+  "permissionMode": "full",
+  "status": "idle",
+  "live": false,
+  "needsYou": false,
+  "createdAt": "2026-10-27T04:00:00.000Z",
+  "updatedAt": "2026-10-27T05:10:00.000Z",
+  "lastActivityAt": "2026-10-27T05:10:00.000Z",
+  "preview": "Building: step 2 of 5.",
+  "kind": "blueprint",
+  "costUsd": 3.05,
+  "blueprint": {
+    "projectId": "p_3b1d9e20",
+    "folder": "/Users/mike/dev/me/threadbear",
+    "builds": [
+      {
+        "threadId": "demo_release_notes",
+        "mode": "thread",
+        "at": "2026-10-27T05:00:00.000Z"
+      }
+    ],
+    "sideChats": {},
+    "steps": [
+      {
+        "id": "s1",
+        "title": "Keep archived threads for undo for ten seconds",
+        "done": {
+          "at": "2026-10-27T05:10:00.000Z",
+          "note": "Added an undo window to archive in runner/src/threads.ts.",
+          "threadId": "demo_blueprint_build"
+        }
+      },
+      {
+        "id": "s2",
+        "title": "Undo in the toast"
+      },
+      {
+        "id": "s3",
+        "title": "Undo from the Edit menu"
+      },
+      {
+        "id": "s4",
+        "title": "Undo on the phone"
+      },
+      {
+        "id": "s5",
+        "title": "Guide and protocol"
+      }
+    ],
+    "createdAt": "2026-10-27T04:00:00.000Z",
+    "updatedAt": "2026-10-27T05:10:00.000Z",
+    "id": "bp_undo",
+    "path": "/Users/mike/dev/me/threadbear/.threadbear/blueprints/archive-undo",
+    "slug": "archive-undo",
+    "title": "Archive with undo",
+    "status": "building",
+    "threadId": "demo_blueprint_building",
+    "rounds": [
+      {
+        "id": "r1",
+        "kind": "questions",
+        "title": "How undo works",
+        "summary": "archive should be undoable for a short while.",
+        "sentAt": "2026-10-27T04:52:00.000Z",
+        "questions": [
+          {
+            "id": "u1",
+            "text": "How long should undo stay possible?",
+            "kind": "number",
+            "youDecide": true,
+            "min": 5,
+            "max": 60,
+            "step": 5
+          },
+          {
+            "id": "u2",
+            "text": "Where can it be undone from?",
+            "kind": "multi",
+            "youDecide": true,
+            "options": [
+              {
+                "id": "toast",
+                "label": "The toast"
+              },
+              {
+                "id": "menu",
+                "label": "Edit, Undo"
+              },
+              {
+                "id": "phone",
+                "label": "The phone"
+              }
+            ]
+          }
+        ],
+        "assumptions": [],
+        "answers": {
+          "u1": {
+            "value": 10
+          },
+          "u2": {
+            "value": [
+              "toast",
+              "menu",
+              "phone"
+            ]
+          }
+        },
+        "sent": {
+          "u1": {
+            "value": 10
+          },
+          "u2": {
+            "value": [
+              "toast",
+              "menu",
+              "phone"
+            ]
+          }
+        }
+      }
+    ],
+    "editedByHand": true,
+    "costUsd": 3.05
+  },
+  "lastSeq": 5,
+  "lastSeenSeq": 5
+}

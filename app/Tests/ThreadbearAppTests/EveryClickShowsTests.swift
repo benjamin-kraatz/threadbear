@@ -16,6 +16,7 @@ final class EveryClickShowsTests: XCTestCase {
         "events", "subscribe", "subagent", "unsubscribe", "markSeen", "startRequest", "importMedia", "usageStats",
         "listClis", "listSchedules", "listRunners", "remoteLogins", "remoteThreads", "previewSchedule",
         "listProjects", "getProject", "refreshProjectTasks", "librarianStatus", "connectorsStatus", "listPools",
+        "listBlueprints",
         // Not calls: helpers on the request types in the same file.
         "applied", "params",
     ]
@@ -27,6 +28,9 @@ final class EveryClickShowsTests: XCTestCase {
         "answerSecret", "checkClis", "updateCli", "setCliPolicy", "createSchedule", "updateSchedule",
         "deleteSchedule", "setRunnerOrder", "runSchedule", "createProject", "updateProject", "setProjectIcon",
         "mergeProject", "deleteProject", "setThreadProjects", "runLibrarian", "updateLibrarian", "savePools",
+        "createBlueprint", "saveBlueprintDraft", "continueBlueprint", "askInstead", "blueprintSideChat", "useBlueprintProposal",
+        "checkBlueprint", "startBlueprint", "blueprintDiff", "tellBlueprintAgent", "updateBlueprintSpec", "tooSmallStart",
+        "deleteBlueprint",
     ]
 
     /// Functions that show their click some other way, and how.
@@ -58,6 +62,7 @@ final class EveryClickShowsTests: XCTestCase {
         "Projects.swift confirmedMerge": "the project goes at once",
         "Projects.swift setProjects": "the chips change at once",
         "Projects.swift setLibrarianPaused": "the button and switch change at once",
+        "AppModel+Blueprints.swift saveBlueprintDraft": "autosave: the answer is on screen already, and a failure shows in the banner",
     ]
 
     private var sources: URL {

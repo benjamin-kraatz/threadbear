@@ -344,6 +344,9 @@ export class Relay {
     for (const k of ['model', 'createdAt', 'lastActivityAt', 'snoozedUntil', 'archivedAt', 'starredAt', 'startedBy', 'asked'] as const) {
       if (t[k] !== undefined) thread[k] = t[k];
     }
+    // A blueprint's side chat or check, which the app leaves out of its lists.
+    if (t.kind === 'blueprint' || t.kind === 'sideChat' || t.kind === 'check') thread.kind = t.kind;
+    if (typeof t.parentThreadId === 'string') thread.parentThreadId = t.parentThreadId;
     if (t.lastActivityAt) thread.updatedAt = t.lastActivityAt;
     if (t.snoozedUntil === UNTIL_RESTART) thread.snoozedUntilRestart = true;
     return thread;

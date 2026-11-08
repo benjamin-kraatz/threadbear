@@ -13,13 +13,15 @@ struct NavigationPlace: Equatable, Sendable {
     var librarianHome = false
     /// The Scheduled page (`showsScheduledHome`).
     var scheduledHome = false
+    /// The Blueprints page (`showsBlueprintsHome`).
+    var blueprintsHome = false
 }
 
 /// Back and forward, like a browser's: ⌘[ and ⌘] in the Go menu, the
 /// side buttons on a mouse, and trackpad swipes (SwipeNavigation).
 extension AppModel {
     var place: NavigationPlace {
-        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId, projectsHome: showsProjectsHome, librarianHome: showsLibrarianHome, scheduledHome: showsScheduledHome)
+        NavigationPlace(mode: sidebarMode, threadId: selection, subagent: subagentSelection, projectId: openProjectId, projectsHome: showsProjectsHome, librarianHome: showsLibrarianHome, scheduledHome: showsScheduledHome, blueprintsHome: showsBlueprintsHome)
     }
 
     /// Called by the didSet of each property that makes up `place`. One
@@ -67,6 +69,7 @@ extension AppModel {
         switch place.mode {
         case .scheduled: return schedulesSupported
         case .projects, .librarian: return projectsSupported
+        case .blueprints: return projectsSupported && !blueprintsUnsupported && BlueprintsSetting.shown
         default: return true
         }
     }
@@ -84,6 +87,7 @@ extension AppModel {
         showsProjectsHome = place.projectsHome
         showsLibrarianHome = place.librarianHome
         showsScheduledHome = place.scheduledHome
+        showsBlueprintsHome = place.blueprintsHome
     }
 }
 

@@ -150,6 +150,8 @@ import { hibernationPart, type HibernationPart } from './runner/hibernation.ts';
 import { newThreadsPart, type NewThreadsPart } from './runner/new-threads.ts';
 import { labReviewPart, type LabReviewPart } from './runner/lab-review.ts';
 import { looseEndsPart, type LooseEndsPart } from './runner/loose-ends.ts';
+import { blueprintsPart, type BlueprintsPart } from './runner/blueprints.ts';
+import type { BlueprintStore } from './blueprints.ts';
 import { CONFINED_NO_SANDBOX, sandboxFor } from './sandbox.ts';
 
 export type Notification =
@@ -171,7 +173,10 @@ export type Notification =
   | { method: 'connectors.updated'; params: { connectors: ConnectorsStatus } }
   // Only from a draining runner, to the primary (handover.ts).
   | { method: 'drain.handedOver'; params: { threadId: string } }
-  | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } };
+  | { method: 'drain.usage'; params: { accountId: string; reading: UsageReading } }
+  // A draining runner's blueprint tools, for a blueprint thread the
+  // primary has, or a check for it to start (runner/blueprints.ts).
+  | { method: 'drain.blueprints'; params: { threadId?: string; events?: EventBody[]; check?: string } };
 
 // hello's `updates` and runner.updates (docs/protocol.md, "Runner updates").
 export type RunnerUpdates = {
@@ -588,7 +593,7 @@ export const UNTIL_RESTART = '9999-12-31T00:00:00.000Z';
 export const NO_WAKE_TIME = UNTIL_RESTART;
 
 // Parts of the Runner that live in runner/ (see each file's top).
-export interface Runner extends LooseEndsPart, LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ButtonsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
+export interface Runner extends BlueprintsPart, LooseEndsPart, LabReviewPart, NewThreadsPart, HibernationPart, TitlesPart, HighlightsPart, PatchesPart, EditingPart, ClisPart, ReviewsPart, ButtonsPart, ApprovalsPart, ProjectsHostPart, StoppedWorkPart, HandoversPart, PoolsPart, NetworkPart, WorktreesPart, CommandsPart {}
 export class Runner {
   // While main.ts is still starting up: waking a thread for its waits
   // (reconcileWaits) would start a CLI whose tools aren't ready, so they
@@ -683,6 +688,10 @@ export class Runner {
   reachable: Reachable;
   appRestartAsked?: (threadId: string) => void;
   atMac?: () => boolean | undefined;
+  // Blueprints (runner/blueprints.ts): the state file, read on first use,
+  // and when each one's spec.md was last compared with its snapshot.
+  bpStore?: BlueprintStore;
+  bpChecked = new Map<string, { at: number; mtime?: number }>();
 
   constructor(deps: RunnerDeps) {
     if ('release' in deps) this.release = deps.release;
@@ -1421,6 +1430,7 @@ export class Runner {
     if (opts.scheduleId) msg.scheduleId = opts.scheduleId;
     if (opts.answers?.length) msg.answers = opts.answers;
     if (opts.editOf) msg.editOf = opts.editOf;
+    if (opts.roundId) msg.roundId = opts.roundId;
     rec.lastActivityAt = this.isoNow();
     if (rt.turn && !opts.queue && fromMike(text, opts) && this.switchWaiting(st)) {
       // He picked another login (another provider, usually) during this
@@ -2070,6 +2080,9 @@ export class Runner {
         );
         break;
       case 'planProposed':
+        // A blueprint's side chat or check has no plan to approve
+        // (requestApproval turns Claude's down): no card.
+        if (rec.kind === 'sideChat' || rec.kind === 'check') break;
         // A newer plan replaces one still waiting (Codex can propose
         // again in plan mode); the old card just stops offering Go ahead.
         if (rec.openPlan && rec.openPlan !== o.itemId) this.emit(st, { type: 'plan.resolved', itemId: rec.openPlan, decision: 'revise' }, rt.turn?.turnId);
@@ -2398,6 +2411,7 @@ export class Runner {
 
   afterTurn(st: ThreadState, limitHit?: string, netLost?: string): void {
     if (this.stopping) return;
+    this.blueprintTurnEnded(st);
     if (limitHit) {
       try {
         this.onUsageLimit(st, limitHit);
@@ -3167,7 +3181,12 @@ export class Runner {
       // (docs/protocol.md, "Needs you"). A pending design review only
       // counts once the turn ends: show_options doesn't block, and Mike
       // didn't want a "Needs you" (or a phone push) mid-turn.
-      needsYou: (!unfinished && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!unfinished && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)),
+      // A blueprint's side chat or check is opened from its form, never the
+      // Inbox: only a card it's parked on needs Mike there. A blueprint
+      // with a round open does, once its turn is over.
+      needsYou: rec.kind === 'sideChat' || rec.kind === 'check'
+        ? rec.status === 'waiting'
+        : (!unfinished && Boolean(rec.reviews?.some(r => r.status === 'pending'))) || rec.status === 'waiting' || Boolean(rec.forceUnread) || (!unfinished && rec.lastTurnCompletedSeq > rec.lastSeenSeq && !this.saidNothing(rec)) || (!unfinished && this.blueprintWaiting(rec)),
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       lastActivityAt: rec.lastActivityAt,
@@ -3227,6 +3246,10 @@ export class Runner {
     }
     if (rec.schedule) s.schedule = { ...rec.schedule };
     if (rec.startedBy) s.startedBy = { ...rec.startedBy };
+    if (rec.kind) s.kind = rec.kind;
+    if (rec.parentThreadId) s.parentThreadId = rec.parentThreadId;
+    const blueprint = this.blueprintSummary(rec);
+    if (blueprint) s.blueprint = blueprint;
     if (rec.asked) s.asked = rec.asked;
     if (rec.panelRequest) s.panelRequest = { ...rec.panelRequest };
     // A record from 28 Oct may say "people" (sharing with specific people,
@@ -3320,6 +3343,9 @@ export class Runner {
     }
     // Where its worktree is and how its work gets to main.
     if (rec.worktree && !rec.worktree.removedAt) parts.push(worktreeInstructions(rec.worktree));
+    // A blueprint thread's job (docs/protocol.md, "Blueprints").
+    const blueprint = this.blueprintBrief(rec);
+    if (blueprint) parts.push(blueprint);
     return parts.length ? { instructions: parts.join('\n\n') } : {};
   }
 
@@ -3461,7 +3487,7 @@ export class Runner {
 
 // The Runner's other methods live in parts under runner/, one area each;
 // they go onto its prototype here, as the class's own methods would be.
-for (const part of [looseEndsPart, labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, buttonsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
+for (const part of [blueprintsPart, looseEndsPart, labReviewPart, newThreadsPart, hibernationPart, titlesPart, highlightsPart, patchesPart, editingPart, clisPart, reviewsPart, buttonsPart, approvalsPart, projectsHostPart, stoppedWorkPart, handoversPart, poolsPart, networkPart, worktreesPart, commandsPart]) {
   for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(part))) {
     Object.defineProperty(Runner.prototype, key, { ...d, enumerable: false });
   }
@@ -3488,7 +3514,7 @@ export function stoppedWorkMessage(what: string[], last: boolean): string {
   ].join('\n');
 }
 
-export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[]; editOf?: number };
+export type SendOptions = { origin?: MessageOrigin; scheduleId?: string; queue?: boolean; answers?: AskAnswer[]; editOf?: number; roundId?: string };
 
 // Typed by Mike, at the Mac or on his phone: not the runner's, a
 // schedule's or an agent's (another thread's, or this one's own `then`
@@ -3538,6 +3564,7 @@ export function userMessage(msg: QueuedSend): EventBody {
     ...(msg.reviewId ? { reviewId: msg.reviewId, reviewResponse: msg.reviewResponse } : {}),
     ...(msg.answers?.length ? { answers: msg.answers } : {}),
     ...(msg.editOf ? { editOf: msg.editOf } : {}),
+    ...(msg.roundId ? { roundId: msg.roundId } : {}),
   };
 }
 

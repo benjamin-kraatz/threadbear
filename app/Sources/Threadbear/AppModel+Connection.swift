@@ -77,6 +77,10 @@ extension AppModel {
                 loadRunners()
                 loadRemoteThreads()
                 loadProjects()
+                // Asked again on each connect: the runner may have moved
+                // to a release with or without blueprints.
+                blueprintsUnsupported = false
+                loadBlueprints()
                 loadConnectors()
                 loadSettings()
                 loadStandingInstructions()
@@ -258,6 +262,7 @@ extension AppModel {
         let previous = threads[thread.id]
         threads[thread.id] = thread
         threadCountMayHaveChanged()
+        if thread.isBlueprint { blueprintSummaryChanged(thread) }
         // The open transcript's "3 sub-agents working in the background"
         // line follows the summary, not the events.
         if previous?.background != thread.background { sessions[thread.id]?.setBackground(thread.background) }

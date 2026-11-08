@@ -95,7 +95,9 @@ public struct ThreadSections: Sendable, Equatable {
         buildCount += 1
         #endif
         var sections = ThreadSections()
-        for thread in threads {
+        // A blueprint's side chats and checks open beside it, not here
+        // (docs/protocol.md, "Blueprints").
+        for thread in threads where thread.parentThreadId == nil {
             switch section(of: thread, now: now, wakes: wakes) {
             case .starred: sections.starred.append(thread)
             case .inbox: sections.inbox.append(thread)

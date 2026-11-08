@@ -6,7 +6,7 @@ import ThreadbearCore
 /// The view picked in the activity bar. Hibernating and Archive were views
 /// too, until they became sections of the inbox (29 Oct).
 enum SidebarMode: Equatable {
-    case inbox, scheduled, projects, librarian
+    case inbox, scheduled, projects, librarian, blueprints
 }
 
 enum ConnectionState: Equatable {
@@ -250,6 +250,7 @@ final class AppModel {
             if sidebarMode != .projects { showsProjectsHome = false }
             if sidebarMode != .librarian { showsLibrarianHome = false }
             if sidebarMode != .scheduled { showsScheduledHome = false }
+            if sidebarMode != .blueprints { showsBlueprintsHome = false }
         }
     }
     /// Back and forward (⌘[ and ⌘], or the mouse's side buttons).
@@ -453,6 +454,17 @@ final class AppModel {
     /// `projects.list` with -32601, and then the activity bar has no
     /// Projects or Librarian button and threads show no project chips.
     var projectsSupported = false
+    /// Blueprints from `blueprints.list`, the found ones (no thread) too.
+    /// The ones with a thread are drawn from its summary, which is newer
+    /// (AppModel+Blueprints.swift).
+    var listedBlueprints: [Blueprint] = []
+    /// The runner answered `blueprints.list` with -32601: no Blueprints.
+    var blueprintsUnsupported = false
+    /// Each blueprint form's state on screen, by thread id: answers not
+    /// saved yet, the layout, which rounds are open.
+    @ObservationIgnored var blueprintForms: [String: BlueprintFormState] = [:]
+    /// What the agent last wrote against spec.md, for Show changes.
+    var blueprintDiff: BlueprintDiffSheet?
     /// What the librarian is doing, once `librarian.status` has answered;
     /// replaced by `librarian.updated`.
     var librarian: LibrarianStatus?
@@ -503,8 +515,18 @@ final class AppModel {
             }
         }
     }
+    /// "Pick a blueprint, or start a new one", from the activity bar's
+    /// Blueprints, until one is picked. Closes the same ways.
+    var showsBlueprintsHome = false {
+        didSet {
+            if showsBlueprintsHome != oldValue {
+                noteNavigation()
+                mainContextChanged()
+            }
+        }
+    }
     /// One of those pages is in the detail area, not the selected thread.
-    var showsHomePage: Bool { showsProjectsHome || showsLibrarianHome || showsScheduledHome }
+    var showsHomePage: Bool { showsProjectsHome || showsLibrarianHome || showsScheduledHome || showsBlueprintsHome }
     /// The runner's settings for the Settings window: nil until
     /// `settings.get` answers, then replaced whole by `settings.updated`.
     var runnerSettings: RunnerSettings?

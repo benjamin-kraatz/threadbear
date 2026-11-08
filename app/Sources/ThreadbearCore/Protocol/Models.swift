@@ -1175,6 +1175,18 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
     /// say so and its requests go there. Nil for this Mac's own. Never on
     /// the wire: a runner's summaries are all its own.
     public var runnerId: String?
+    /// "blueprint" for a blueprint thread, "sideChat" or "check" for one of
+    /// its children; nil for an ordinary thread (docs/protocol.md,
+    /// "Blueprints"). A kind from a newer runner is kept as it is.
+    public var kind: String?
+    /// A side chat's or check's blueprint thread. The Inbox skips threads
+    /// that have one.
+    public var parentThreadId: String?
+    /// On a blueprint thread: the blueprint, which the form draws from.
+    public var blueprint: Blueprint?
+
+    /// A blueprint thread: the form shows in place of the transcript.
+    public var isBlueprint: Bool { kind == "blueprint" }
 
     /// Lives on another runner.
     public var isRemote: Bool { runnerId != nil }
@@ -1314,6 +1326,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         panelRequest = (try? c.decodeIfPresent(PanelRequest.self, forKey: .panelRequest)) ?? nil
         share = (try? c.decodeIfPresent(ThreadShare.self, forKey: .share)) ?? nil
         looseEnds = (try? c.decodeIfPresent(LooseEnds.self, forKey: .looseEnds)) ?? nil
+        kind = ((try? c.decodeIfPresent(String.self, forKey: .kind)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
+        parentThreadId = ((try? c.decodeIfPresent(String.self, forKey: .parentThreadId)) ?? nil).flatMap { $0.isEmpty ? nil : $0 }
+        blueprint = (try? c.decodeIfPresent(Blueprint.self, forKey: .blueprint)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1376,6 +1391,9 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         try c.encodeIfPresent(panelRequest, forKey: .panelRequest)
         try c.encodeIfPresent(share, forKey: .share)
         try c.encodeIfPresent(looseEnds, forKey: .looseEnds)
+        try c.encodeIfPresent(kind, forKey: .kind)
+        try c.encodeIfPresent(parentThreadId, forKey: .parentThreadId)
+        try c.encodeIfPresent(blueprint, forKey: .blueprint)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1383,6 +1401,7 @@ public struct ThreadSummary: Sendable, Hashable, Codable, Identifiable {
         case createdAt, updatedAt, lastActivityAt, snoozedUntil, snoozedUntilRestart, snoozedUntilRelease, wakeWhen, waitingOn, woke, archivedAt, starredAt, onOldRunner, preview
         case lastSeq, lastSeenSeq, nativeSessionId, contextTokens, contextWindow, costUsd, panels, actions, hooks, patches, background, subagents
         case projects, worktree, needs, asks, asksSeq, highlightsAt, schedule, startedBy, asked, poolId, waitingForRoom, waitingForNetwork, panelRequest, share, sample, looseEnds
+        case kind, parentThreadId, blueprint
     }
 
     enum NetworkWaitKeys: String, CodingKey { case since }

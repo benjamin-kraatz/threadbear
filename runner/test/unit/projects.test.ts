@@ -1273,3 +1273,16 @@ test('a look from the first message alone leaves the Pocket to its agent, and a 
   assert.match(s.asked.at(-1)!.prompt, /The Pocket is not available/);
   assert.equal(fake.saved.length, 0);
 });
+
+test("the librarian leaves a blueprint's side chats and checks alone: their blueprint is filed", async () => {
+  const s = setup({ models: () => reply({ projects: [], why: 'A one-off' }) });
+  const { h, finish, librarian } = s;
+  const { thread } = h.runner.create({ text: 'Which option is better for question 2?', cwd: s.misc, accountId: 'claude-3', blueprint: { kind: 'sideChat', blueprintId: 'bp1', parentThreadId: 'the-blueprint-thread' } });
+  assert.equal(rec(h, thread.id).parentThreadId, 'the-blueprint-thread');
+  await finish(thread.id);
+  h.clock.advance(SWEEP_MS);
+  await tick(8);
+  assert.ok(!librarian.status().queue.some((j) => j.threadId === thread.id), 'never queued');
+  assert.ok(!librarian.status().recent.some((j) => j.threadId === thread.id), 'never looked at');
+  assert.equal(s.asked.length, 0, 'no model call');
+});

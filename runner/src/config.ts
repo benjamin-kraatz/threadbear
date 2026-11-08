@@ -65,6 +65,9 @@ export type Config = {
     model?: string;
     models?: Partial<Record<Provider, string>>;
     efforts?: Partial<Record<Provider, EffortLevel>>;
+    // The cheaper model a blueprint's side chats and checks start on, per
+    // provider (runner/blueprints.ts); unset is Haiku for Claude.
+    smallModels?: Partial<Record<Provider, string>>;
   };
   // Where accounts are discovered. Tests can narrow these.
   claudeMainDir: string;
@@ -145,6 +148,7 @@ export type RunnerJson = {
     model?: string;
     models?: Partial<Record<Provider, string>>;
     efforts?: Partial<Record<Provider, EffortLevel>>;
+    smallModels?: Partial<Record<Provider, string>>;
   };
   claudePath?: string;
   idleMinutes?: number;
@@ -246,6 +250,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const codexPath = nonEmpty(env.THREADBEAR_CODEX_PATH) ?? nonEmpty(json.codexPath);
   const models = providerMap(json.defaults?.models, nonEmpty);
   const efforts = providerMap(json.defaults?.efforts, (v) => (isEffortLevel(v) ? v : undefined));
+  const smallModels = providerMap(json.defaults?.smallModels, nonEmpty);
   return {
     home,
     port,
@@ -261,6 +266,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       model: nonEmpty(json.defaults?.model),
       ...(models ? { models } : {}),
       ...(efforts ? { efforts } : {}),
+      ...(smallModels ? { smallModels } : {}),
     },
     claudeMainDir: expandHome(env.THREADBEAR_CLAUDE_MAIN_DIR || '~/.claude'),
     claudeMainJson: expandHome(env.THREADBEAR_CLAUDE_MAIN_JSON || '~/.claude.json'),
