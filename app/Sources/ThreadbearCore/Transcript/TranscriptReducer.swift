@@ -121,6 +121,17 @@ public struct TranscriptModel: Sendable {
     /// The agent's last word on a blueprint was `too_small`, and why; nil
     /// once it puts a round (docs/protocol.md, "Blueprints").
     public private(set) var blueprintTooSmall: String?
+    /// What the running turn is doing right now, in the words the work
+    /// group's header uses ("Read snooze.ts", "Thinking"): the newest tool
+    /// of the open turn still waiting for its result, or thinking still
+    /// streaming. Nil between steps and when no turn is open. Only the open
+    /// turn's items are looked at, so a long thread costs nothing extra.
+    public var liveAction: String? {
+        guard let openTurn else { return nil }
+        var start = items.endIndex
+        while start > items.startIndex, items[start - 1].turnId == openTurn { start -= 1 }
+        return WorkSummary.currentAction(items[start...])
+    }
     /// A side chat's newest proposed answer (`blueprint.proposal`), for
     /// the card with Use over its composer.
     public private(set) var blueprintProposal: BlueprintProposal?

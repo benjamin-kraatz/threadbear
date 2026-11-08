@@ -116,6 +116,34 @@ final class BlueprintTests: XCTestCase {
         XCTAssertEqual(again.kind, "blueprint")
     }
 
+    // MARK: The agent at work
+
+    func testAgentWorkingIsARunningTurn() {
+        XCTAssertTrue(BlueprintRules.agentWorking(.running))
+        XCTAssertTrue(BlueprintRules.agentWorking(.starting))
+        XCTAssertFalse(BlueprintRules.agentWorking(.waiting), "a card waiting on Mike isn't the agent working")
+        XCTAssertFalse(BlueprintRules.agentWorking(.idle), "between rounds the form waits, not the agent")
+        XCTAssertFalse(BlueprintRules.agentWorking(.error))
+        XCTAssertEqual(BlueprintText.working(elapsed: "12s", action: "Read snooze.ts"), "Working for 12s · Read snooze.ts")
+        XCTAssertEqual(BlueprintText.working(elapsed: "12s", action: nil), "Working for 12s")
+        XCTAssertEqual(BlueprintText.working(elapsed: "12s", action: ""), "Working for 12s")
+    }
+
+    func testLiveActionIsTheOpenTurnsNewestUnfinishedStep() {
+        var model = TranscriptModel(events: [E.user(1, "Go"), E.event(2, "turn.started"),
+                                             E.call(3, "c1", name: "Read", kind: "read", title: "Read snooze.ts")])
+        XCTAssertEqual(model.liveAction, "Read snooze.ts")
+        _ = model.apply([E.result(4, "c1")])
+        XCTAssertNil(model.liveAction, "between steps")
+        _ = model.apply([E.call(5, "c2", title: "grep snooze runner/src", input: ["command": "grep snooze runner/src"])])
+        XCTAssertEqual(model.liveAction, "Running grep snooze runner/src")
+        _ = model.apply([E.result(6, "c2"), E.done(7)])
+        XCTAssertNil(model.liveAction, "no turn open")
+        // A new turn doesn't pick up the old one's steps.
+        _ = model.apply([E.user(8, "More"), E.event(9, "turn.started", turn: "t2")])
+        XCTAssertNil(model.liveAction)
+    }
+
     // MARK: Events
 
     func testBlueprintEventsDecodeAndReadAsLines() {

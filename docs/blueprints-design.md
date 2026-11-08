@@ -493,6 +493,14 @@ spec's sections, the template text if any, and the too-small rule.
   now, the too-small card, the edited-by-hand and spec-stale banners.
 - Side chats open in the pane (`PaneSection.thread(id)` or the existing
   way a sub-agent is shown).
+- While the thread's status is running or starting
+  (`BlueprintRules.agentWorking`), the form shows the agent is at work in
+  three places: a working line under the last round ("Working for 12s ·
+  Read snooze.ts", the transcript's live action from
+  `TranscriptModel.liveAction`, which the round replaces when it lands),
+  the sidebar's turning arc before the state word in the header, and the
+  same arc on the blueprint's row in the list. Benjamin asked for it on
+  8 Nov after having to turn Transcript on to see anything happening.
 - `ComposerView` placeholder and Return while a round is open.
 - The Inbox skips threads with `parentThreadId`; a blueprint thread's
   row opens the form.

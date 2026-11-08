@@ -37,7 +37,7 @@ final class ThreadSession {
     private(set) var missing = false
     @ObservationIgnored private var refreshing = false
     @ObservationIgnored private(set) var feed = ThreadFeed() {
-        didSet { syncOpenCard() }
+        didSet { syncOpenCard(); syncLiveAction() }
     }
     /// First model row the table shows.
     @ObservationIgnored private(set) var displayStart = 0
@@ -79,6 +79,11 @@ final class ThreadSession {
     /// The open card (TranscriptModel.openCard), observed, so the composer
     /// it's drawn in follows its picks and notes and drops it once it closes.
     private(set) var openCard: TranscriptRow?
+    /// The transcript model's `liveAction`, observed, for the blueprint
+    /// form's working line, which has no table of rows to be told through.
+    /// Set only when the words change, so a stream of deltas doesn't
+    /// redraw the form.
+    private(set) var liveAction: String?
     /// A blueprint side chat's newest proposed answer, observed, for the
     /// card with Use over its composer (TranscriptModel.blueprintProposal).
     private(set) var blueprintProposal: BlueprintProposal?
@@ -548,6 +553,11 @@ final class ThreadSession {
         let inserted = IndexSet(change.inserted.compactMap { $0 >= start ? $0 - start : nil })
         let updated = IndexSet(change.updated.compactMap { $0 >= start ? $0 - start : nil })
         view?.apply(removed: removed, inserted: inserted, updated: updated)
+    }
+
+    private func syncLiveAction() {
+        let action = feed.model.liveAction
+        if action != liveAction { liveAction = action }
     }
 
     private static func cardSeq(_ row: TranscriptRow?) -> Int? {

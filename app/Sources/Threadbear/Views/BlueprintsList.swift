@@ -75,7 +75,16 @@ private struct BlueprintRow: View {
             Text(blueprint.title.isEmpty ? "Untitled" : blueprint.title)
                 .font(.system(size: TypeScale.sidebarTitle))
                 .lineLimit(1)
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: zoomed(5)) {
+                if let threadId = blueprint.threadId, let status = app.threads[threadId]?.status, BlueprintRules.agentWorking(status) {
+                    // The agent is on it: the sidebar's working arc, in the
+                    // state's colour, so the list says which one without
+                    // opening it.
+                    SpinnerMark(color: BlueprintLook.stateNSColor(blueprint))
+                        .frame(width: zoomed(10), height: zoomed(10))
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(3) }
+                        .tip("The agent is working on it")
+                }
                 Text(BlueprintText.state(blueprint))
                     .foregroundStyle(BlueprintLook.stateColor(blueprint))
                     .lineLimit(1)
@@ -127,13 +136,19 @@ enum BlueprintLook {
     static let moving = Color(nsColor: .controlAccentColor)
 
     static func stateColor(_ blueprint: Blueprint) -> Color {
-        if blueprint.tooSmall != nil, blueprint.rounds.isEmpty { return waiting }
+        if blueprint.status == .done, !(blueprint.tooSmall != nil && blueprint.rounds.isEmpty) { return .secondary }
+        return Color(nsColor: stateNSColor(blueprint))
+    }
+
+    /// The same, for AppKit-drawn marks (the working arc beside the state).
+    static func stateNSColor(_ blueprint: Blueprint) -> NSColor {
+        if blueprint.tooSmall != nil, blueprint.rounds.isEmpty { return .systemOrange }
         switch blueprint.status {
-        case .waiting: return waiting
-        case .drafting: return blueprint.specStale ? waiting : moving
-        case .ready: return ready
-        case .building: return moving
-        case .done: return .secondary
+        case .waiting: return .systemOrange
+        case .drafting: return blueprint.specStale ? .systemOrange : .controlAccentColor
+        case .ready: return .systemGreen
+        case .building: return .controlAccentColor
+        case .done: return .secondaryLabelColor
         }
     }
 }

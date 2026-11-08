@@ -24,7 +24,7 @@ struct BlueprintPane: View {
             if form.showsTranscript {
                 TranscriptView(session: session, controller: app.transcript)
             } else if let blueprint {
-                BlueprintForm(thread: thread, blueprint: blueprint, form: form)
+                BlueprintForm(thread: thread, blueprint: blueprint, form: form, session: session)
             } else {
                 VStack(spacing: zoomed(8)) {
                     ProgressView().controlSize(.small)
@@ -125,6 +125,15 @@ private struct BlueprintHeader: View {
             .frame(minWidth: 0, idealWidth: fixed ? nil : 0, alignment: .leading)
             .layoutPriority(-1)
         if let blueprint {
+            if BlueprintRules.agentWorking(thread.status) {
+                // The same arc as a working row in the sidebar, in the
+                // state's colour: the agent is on it, wherever the form is
+                // scrolled to.
+                SpinnerMark(color: BlueprintLook.stateNSColor(blueprint))
+                    .frame(width: zoomed(12), height: zoomed(12))
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(4) }
+                    .tip("The agent is working on the blueprint")
+            }
             Text(BlueprintText.state(blueprint, forYou: true))
                 .foregroundStyle(BlueprintLook.stateColor(blueprint))
                 .lineLimit(1)
@@ -248,10 +257,15 @@ private struct BlueprintForm: View {
     let thread: ThreadSummary
     let blueprint: Blueprint
     let form: BlueprintFormState
+    /// For the working line's "what it's doing now" (`liveAction`).
+    let session: ThreadSession?
     @AppStorage(BlueprintLayout.key) private var layout = BlueprintLayout.stacked.rawValue
 
     var body: some View {
         let rules = form.rules(for: blueprint)
+        // The agent is on the next round (or the spec): say so where that
+        // round will land, rather than leaving the form still until it does.
+        let working = !rules.showsTooSmall && BlueprintRules.agentWorking(thread.status)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: zoomed(12)) {
@@ -263,6 +277,9 @@ private struct BlueprintForm: View {
                         ForEach(blueprint.rounds) { round in
                             roundView(round, rules: rules, folded: form.isFolded(round, rules: rules))
                         }
+                    }
+                    if working {
+                        WorkingLine(thread: thread, action: session?.liveAction)
                     }
                     if !rules.showsTooSmall, !blueprint.steps.isEmpty || rules.showsStart {
                         StepsCard(thread: thread, blueprint: blueprint, rules: rules)
@@ -276,7 +293,7 @@ private struct BlueprintForm: View {
                             Spacer()
                         }
                     }
-                    if blueprint.rounds.isEmpty, !rules.showsTooSmall {
+                    if blueprint.rounds.isEmpty, !rules.showsTooSmall, !working {
                         Text(blueprint.threadId == nil ? "Found in the project's folder, with no rounds to show." : "The agent is reading the code for its first questions.")
                             .font(.system(size: TypeScale.label))
                             .foregroundStyle(.secondary)
@@ -339,6 +356,37 @@ private struct BlueprintForm: View {
             }
             RoundCard(thread: thread, blueprint: blueprint, round: rounds[index], rules: rules, form: form)
         }
+    }
+}
+
+/// Under the last round while the agent works on the next: the turning
+/// arc, how long the turn has run, and what it's doing right now, from the
+/// transcript's live action ("Read snooze.ts", "Thinking"). The round
+/// takes this spot when it arrives. The seconds tick in a TimelineView, as
+/// the sidebar's working rows do, so nothing else is laid out again.
+private struct WorkingLine: View {
+    let thread: ThreadSummary
+    let action: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: zoomed(8)) {
+            SpinnerMark(color: .controlAccentColor)
+                .frame(width: zoomed(14), height: zoomed(14))
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + zoomed(5) }
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(BlueprintText.working(elapsed: ThreadRowLook.workingLabel(since: thread.lastActivityAt, now: context.date), action: action))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .font(.system(size: TypeScale.label))
+        .foregroundStyle(Color(nsColor: Theme.quietText))
+        .padding(.horizontal, zoomed(16))
+        .padding(.vertical, zoomed(4))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tip("What the agent is doing now; the Transcript switch shows all of it")
+        .accessibilityElement(children: .combine)
     }
 }
 

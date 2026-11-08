@@ -55,6 +55,15 @@ public enum BlueprintText {
         return parts.joined(separator: ", ")
     }
 
+    /// The line under the last round while the agent works on the next:
+    /// "Working for 12s · Reading snooze.ts". The action is the transcript's
+    /// live one (`TranscriptModel.liveAction`), nil between steps.
+    public static func working(elapsed: String, action: String?) -> String {
+        let head = "Working for " + elapsed
+        guard let action, !action.isEmpty else { return head }
+        return head + " · " + action
+    }
+
     /// Dollars, as the sidebar shows cost: "$0.84".
     public static func cost(_ usd: Double) -> String {
         guard usd.isFinite, usd > 0 else { return "$0.00" }
@@ -94,6 +103,15 @@ public struct BlueprintRules: Sendable, Equatable {
     public init(blueprint: Blueprint, answers: [String: [String: BlueprintAnswer]] = [:]) {
         self.blueprint = blueprint
         self.answers = answers
+    }
+
+    /// The agent is at work on the blueprint: its thread has a turn running
+    /// (or starting). Not `.waiting`, which is a card in the transcript
+    /// waiting on Mike, and not idle between rounds, when the form waits.
+    /// The header's state, the row in the list and the working line under
+    /// the rounds all go by this one answer.
+    public static func agentWorking(_ status: ThreadStatus) -> Bool {
+        status == .running || status == .starting
     }
 
     public var answering: Answering {

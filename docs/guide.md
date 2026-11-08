@@ -822,7 +822,11 @@ agent ("always settle telemetry and settings"), not questions asked word for
 word.
 
 The header shows the cost so far, side chats and check included, a switch
-between rounds stacked or one at a time, and a Transcript toggle. The iPhone
+between rounds stacked or one at a time, and a Transcript toggle. While the
+agent works on the next round, a line under the last one says how long it
+has been at it and what it's doing ("Working for 12s · Read snooze.ts"), the
+state in the header gets a turning arc, and so does the blueprint's row in
+the list, so you can see it's on it without opening the transcript. The iPhone
 app only tells you to open a blueprint on your Mac for now. If you don't
 want the feature, turn off "Show Blueprints" in Settings > General; the
 button goes, and a blueprint thread you open from the Inbox still shows its
