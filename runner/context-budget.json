@@ -1,19 +1,19 @@
 {
   "claude": {
     "instructions": 2733,
-    "tools": 35210,
-    "total": 37943
+    "tools": 35227,
+    "total": 37960
   },
   "codex": {
     "instructions": 2158,
-    "tools": 35309,
-    "total": 37467
+    "tools": 35326,
+    "total": 37484
   },
   "worktreeInstructions": 498,
   "perTool": {
     "ask_secret": 1241,
     "create_project": 1335,
-    "create_thread": 2373,
+    "create_thread": 2390,
     "delete_schedule": 267,
     "delete_thread": 445,
     "end_turn": 7884,
