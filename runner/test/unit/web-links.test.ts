@@ -124,14 +124,21 @@ test('a page full of long rows and links has a bounded cost', () => {
   // mirror keeps that every search reads to the end, then 40 messages of as
   // many different links as fit.
   const page: { seq: number; role: 'user' | 'assistant' | 'tool'; text: string }[] = [{ seq: 0, role: 'user', text: 'Go' }];
-  for (let i = 1; i <= 40; i++) page.push({ seq: i, role: 'tool', text: 'z '.repeat(4000) });
-  for (let i = 41; i <= 80; i++) page.push({ seq: i, role: 'assistant', text: '' });
-  let found = 0;
-  const ms = cpuMs(() => {
-    for (let m = 41; m <= 80; m++) for (let l = 0; l < 700; l++) if (findStep(`z q${m}-${l}`, m, page) !== undefined) found++;
+  // Count row visits rather than milliseconds. Process CPU time also counts
+  // V8's background threads, and crossed 100 ms during a release build on a
+  // busy Mac. A missing scan budget must fail regardless of machine speed.
+  let visits = 0;
+  for (let i = 1; i <= 80; i++) page.push({
+    seq: i,
+    get role() { visits++; return i <= 40 ? 'tool' as const : 'assistant' as const; },
+    text: i <= 40 ? 'z '.repeat(4000) : '',
   });
+  let found = 0;
+  for (let m = 41; m <= 80; m++) for (let l = 0; l < 700; l++) if (findStep(`z q${m}-${l}`, m, page) !== undefined) found++;
   assert.equal(found, 0);
-  assert.ok(ms < 100, `took ${ms.toFixed(0)} ms`);
+  // One visit per link after exhaustion, plus the initial scan and row
+  // normalisation. Without the budget this fixture visits over a million rows.
+  assert.ok(visits < 30_000, `visited ${visits} rows`);
   // Links that do find their step still do, on a fresh page.
   assert.equal(findStep('Run the tests', 9, [...rows]), 5);
 });
