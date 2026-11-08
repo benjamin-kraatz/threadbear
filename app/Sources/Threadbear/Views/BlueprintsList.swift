@@ -9,7 +9,6 @@ import ThreadbearCore
 /// the form.
 struct BlueprintsList: View {
     @Environment(AppModel.self) private var app
-    @State private var creating = false
 
     var body: some View {
         let blueprints = app.allBlueprints
@@ -17,13 +16,10 @@ struct BlueprintsList: View {
         VStack(spacing: 0) {
             ModeHeader(title: "Blueprints", count: app.blueprintsWaiting)
             SidebarButtonRow(icon: "plus", title: "New blueprint", tip: "Describe a feature and answer the agent's questions about it",
-                             busy: app.isBusy(BusyKey.newBlueprint)) {
-                creating = true
+                             active: app.showsBlueprintsHome && app.selection == nil, busy: app.isBusy(BusyKey.newBlueprint)) {
+                app.newBlueprint()
             }
             .padding(.horizontal, SidebarMetrics.outerInset)
-            .popover(isPresented: $creating, arrowEdge: .trailing) {
-                NewBlueprintForm { creating = false }
-            }
             ScrollView {
                 // Not lazy: a few dozen rows at most, and a lazy stack kept a
                 // row's old state when it moved to another group.
@@ -142,113 +138,165 @@ enum BlueprintLook {
     }
 }
 
-/// New blueprint: which project (or a new one, with a title and a folder),
-/// and the feature in a line or at length. Start makes it and opens it.
-private struct NewBlueprintForm: View {
+/// The New blueprint page, in the detail area while the Blueprints view is
+/// open and no blueprint is picked: which project (or a new one, with a
+/// title and a folder), and the feature in a line or at length. Start makes
+/// it and opens it. What's typed stays while Mike looks around.
+struct BlueprintsHome: View {
     @Environment(AppModel.self) private var app
-    let close: () -> Void
-    @State private var projectId: String = ""
-    @State private var newTitle = ""
-    @State private var newFolder = ""
-    @State private var text = ""
-
-    private static let newProject = "new"
+    @FocusState private var describing: Bool
 
     var body: some View {
-        let projects = app.projects.filter { !$0.archived && !$0.folders.isEmpty }
-        let isNew = projectId == Self.newProject
+        @Bindable var app = app
+        let draft = app.newBlueprintDraft
+        let projects = app.projects.filter { !$0.archived }
+        let isNew = draft.projectId == NewBlueprintDraft.newProject
+        let picked = projects.first { $0.id == draft.projectId }
+        let noFolders = picked.map { $0.folders.isEmpty } ?? false
         let busy = app.isBusy(BusyKey.newBlueprint)
-        let ready = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (isNew ? !newTitle.trimmingCharacters(in: .whitespaces).isEmpty && !newFolder.isEmpty : !projectId.isEmpty)
-        VStack(alignment: .leading, spacing: zoomed(10)) {
-            Text("New blueprint").font(.headline)
-            Picker("Project", selection: $projectId) {
-                ForEach(projects) { project in
-                    Text(project.title).tag(project.id)
+        let ready = !draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (isNew ? !draft.newTitle.trimmingCharacters(in: .whitespaces).isEmpty && !draft.newFolder.isEmpty
+                      : picked != nil && !noFolders)
+        ScrollView {
+            VStack(alignment: .leading, spacing: zoomed(14)) {
+                VStack(alignment: .leading, spacing: zoomed(6)) {
+                    Text("New blueprint")
+                        .font(.system(size: TypeScale.headings.0, weight: .semibold))
+                    Text("Describe a feature. The agent reads the code, asks you rounds of questions and writes a spec into the repo.")
+                        .font(.system(size: TypeScale.label))
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Divider()
-                Text("New project…").tag(Self.newProject)
-            }
-            .tip("The project the blueprint is for; its spec goes in the project's folder")
-            if isNew {
-                TextField("Title", text: $newTitle)
-                    .textFieldStyle(.roundedBorder)
-                    .tip("The new project's name")
+                .padding(.bottom, zoomed(6))
+                field("Project") {
+                    Picker("Project", selection: $app.newBlueprintDraft.projectId) {
+                        if draft.projectId.isEmpty { Text("Pick a project").tag("") }
+                        ForEach(projects) { project in Text(project.title).tag(project.id) }
+                        Divider()
+                        Text("New project…").tag(NewBlueprintDraft.newProject)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .tip("The project the blueprint is for; its spec goes in the project's folder")
+                }
+                if isNew {
+                    field("Title") {
+                        TextField("The new project's name", text: $app.newBlueprintDraft.newTitle)
+                            .textFieldStyle(.roundedBorder)
+                            .tip("The new project's name")
+                    }
+                    field("Folder") {
+                        HStack(spacing: zoomed(10)) {
+                            Text(draft.newFolder.isEmpty ? "No folder chosen" : draft.newFolder.abbreviatingHome)
+                                .foregroundStyle(draft.newFolder.isEmpty ? .secondary : .primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button("Choose…") { chooseFolder() }
+                                .tip("Pick the new project's folder: the spec is written into it")
+                            Spacer(minLength: 0)
+                        }
+                    }
+                } else if let picked {
+                    field("Folder") {
+                        VStack(alignment: .leading, spacing: zoomed(4)) {
+                            if let folder = ProjectBlueprints.folder(of: picked) {
+                                Text(folder.abbreviatingHome)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .tip("Where the spec is written; change it on the project's page")
+                            } else {
+                                Text("\(picked.title) has no folders yet. Add one on its page, or pick New project.")
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button("Open \(picked.title)") { app.openProjectPage(picked.id) }
+                                    .buttonStyle(.link)
+                                    .tip("The project's page, where folders are added")
+                            }
+                        }
+                    }
+                }
+                Text("What's the feature?")
+                    .font(.system(size: TypeScale.label, weight: .medium))
+                    .padding(.top, zoomed(4))
+                TextEditor(text: $app.newBlueprintDraft.text)
+                    .font(.system(size: TypeScale.body))
+                    .focused($describing)
+                    .frame(minHeight: zoomed(160))
+                    .scrollContentBackground(.hidden)
+                    .padding(zoomed(8))
+                    .background(Color(nsColor: Theme.codeBackground), in: RoundedRectangle(cornerRadius: zoomed(8)))
+                    .overlay(RoundedRectangle(cornerRadius: zoomed(8)).strokeBorder(Color(nsColor: describing ? .controlAccentColor : Theme.cardBorder),
+                                                                                      lineWidth: describing ? 1 : 0.5))
+                    .tip("Describe it in a line or at length. The agent reads the code and asks what it needs to know.")
                 HStack {
-                    Text(newFolder.isEmpty ? "No folder chosen" : (newFolder as NSString).abbreviatingWithTildeInPath)
-                        .foregroundStyle(newFolder.isEmpty ? .secondary : .primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    Button("Start") { start() }
+                        .buttonStyle(BlueprintButtonStyle(kind: .primary, large: true))
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(!ready)
+                        .busy(busy)
+                        .tip(ready ? "Make the blueprint and let the agent put its first questions"
+                                   : "Pick a project with a folder (or make one) and describe the feature first")
                     Spacer()
-                    Button("Choose…") { chooseFolder() }
-                        .tip("Pick the new project's folder")
                 }
+                .padding(.top, zoomed(4))
             }
-            Text("What's the feature?")
-                .font(.system(size: TypeScale.label))
-                .foregroundStyle(.secondary)
-            TextEditor(text: $text)
-                .font(.system(size: TypeScale.body))
-                .frame(minHeight: zoomed(110))
-                .scrollContentBackground(.hidden)
-                .padding(zoomed(6))
-                .background(Color(nsColor: Theme.codeBackground), in: RoundedRectangle(cornerRadius: zoomed(6)))
-                .overlay(RoundedRectangle(cornerRadius: zoomed(6)).strokeBorder(Color(nsColor: Theme.cardBorder), lineWidth: 0.5))
-                .tip("Describe it in a line or at length. The agent reads the code and asks what it needs to know.")
-            HStack {
-                Spacer()
-                Button("Cancel") { close() }
-                    .keyboardShortcut(.cancelAction)
-                    .tip("Close without making a blueprint")
-                Button("Start") { start(isNew: isNew) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!ready)
-                    .busy(busy)
-                    .tip("Make the blueprint and let the agent put its first questions")
-            }
+            .frame(maxWidth: zoomed(560), alignment: .leading)
+            .padding(.horizontal, zoomed(32))
+            .padding(.vertical, zoomed(40))
+            .frame(maxWidth: .infinity)
         }
-        .padding(zoomed(16))
-        .frame(width: zoomed(380))
         .onAppear {
-            if projectId.isEmpty { projectId = projects.first?.id ?? Self.newProject }
+            if app.newBlueprintDraft.projectId.isEmpty, let first = projects.first(where: { !$0.folders.isEmpty }) ?? projects.first {
+                app.newBlueprintDraft.projectId = first.id
+            }
+            describing = true
         }
+        .onChange(of: app.newBlueprintFocus) { _, _ in describing = true }
     }
 
+    private func field<Control: View>(_ title: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: zoomed(12)) {
+            Text(title)
+                .font(.system(size: TypeScale.label))
+                .foregroundStyle(.secondary)
+                .frame(width: zoomed(64), alignment: .leading)
+            control()
+        }
+        .font(.system(size: TypeScale.label))
+    }
+
+    /// As a sheet on the window, so nothing under it closes; the folder's
+    /// name fills an empty title.
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
         panel.prompt = "Choose"
-        if panel.runModal() == .OK, let url = panel.url {
-            newFolder = url.path
-            if newTitle.isEmpty { newTitle = url.lastPathComponent }
+        panel.message = "The new project's folder"
+        let app = app
+        let picked: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                app.newBlueprintDraft.newFolder = url.path
+                if app.newBlueprintDraft.newTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+                    app.newBlueprintDraft.newTitle = url.lastPathComponent
+                }
+            }
+        }
+        if let window = MainWindowFrame.window {
+            panel.beginSheetModal(for: window, completionHandler: picked)
+        } else {
+            picked(panel.runModal())
         }
     }
 
-    private func start(isNew: Bool) {
-        let description = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let project = isNew ? nil : projectId
-        let made = isNew ? (title: newTitle.trimmingCharacters(in: .whitespaces), folder: newFolder) : nil
-        app.createBlueprint(projectId: project, newProject: made, text: description) { ok in
-            if ok { close() }
-        }
-    }
-}
-
-/// The detail area while the Blueprints view is open and none is picked.
-struct BlueprintsHome: View {
-    var body: some View {
-        VStack(spacing: zoomed(8)) {
-            Text("Pick a blueprint, or start a new one")
-                .font(.system(size: TypeScale.body))
-                .foregroundStyle(.secondary)
-            Text("A blueprint plans a feature with you: describe it, answer the agent's questions, and it writes a spec into the repo to build from.")
-                .font(.system(size: TypeScale.label))
-                .foregroundStyle(SidebarMetrics.faint)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: zoomed(420))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func start() {
+        let draft = app.newBlueprintDraft
+        let isNew = draft.projectId == NewBlueprintDraft.newProject
+        let description = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let made = isNew ? (title: draft.newTitle.trimmingCharacters(in: .whitespaces), folder: draft.newFolder) : nil
+        app.createBlueprint(projectId: isNew ? nil : draft.projectId, newProject: made, text: description) { _ in }
     }
 }

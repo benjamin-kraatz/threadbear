@@ -52,7 +52,11 @@ Plain words in the UI, no eyebrow labels, no em dashes.
 .blueprints`). It opens a sidebar list grouped by project, then by state:
 Waiting for you, Drafting, Ready, Building, Done. A row shows the title,
 the state in words ("Round 2 waiting", "Ready", "Step 2 of 5"), and the
-cost so far. "New blueprint" is at the top of the list.
+cost so far. "New blueprint" is at the top of the list, and the form for
+it lives in the centre column, where the empty state sits when nothing is
+selected: project (or "New project…" with a title and a folder chosen
+through the open panel), the description, Start. It was a popover first,
+and the open panel closed it (Benjamin, 8 Nov), so it's a page.
 
 **A blueprint is a thread** (`kind: "blueprint"` on its summary), so it
 gets the event log, Usage, Needs you, accounts, models and restarts for

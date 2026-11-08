@@ -28,6 +28,17 @@ extension BusyKey {
     static func projectBlueprints(_ projectId: String, _ field: String) -> String { "projectBlueprints/\(projectId)/\(field)" }
 }
 
+/// The New blueprint page's fields.
+struct NewBlueprintDraft: Equatable {
+    /// A project's id, `newProject` for a new one, or empty for none picked yet.
+    var projectId = ""
+    var newTitle = ""
+    var newFolder = ""
+    var text = ""
+
+    static let newProject = "new"
+}
+
 /// The diff behind Show changes, while its sheet is up.
 struct BlueprintDiffSheet: Identifiable, Equatable {
     var id: String { threadId }
@@ -181,6 +192,17 @@ extension AppModel {
         if let asked = form.askedAnyway, !blueprint.rounds.isEmpty || blueprint.tooSmall != asked { form.askedAnyway = nil }
     }
 
+    /// New blueprint in the list: no blueprint picked, so the detail is the
+    /// New blueprint page, with the cursor in its description.
+    func newBlueprint() {
+        guard BlueprintsSetting.shown else { return }
+        if sidebarMode != .blueprints { sidebarMode = .blueprints }
+        if selection != nil { select(nil) }
+        openProjectId = nil
+        showsBlueprintsHome = true
+        newBlueprintFocus += 1
+    }
+
     func blueprintForm(_ threadId: String) -> BlueprintFormState {
         if let form = blueprintForms[threadId] { return form }
         let made = BlueprintFormState(threadId: threadId)
@@ -221,6 +243,7 @@ extension AppModel {
                 if let threadId = made.thread?.id ?? made.blueprint?.threadId { select(threadId) }
                 if newProject != nil { loadProjects() }
                 loadBlueprints()
+                newBlueprintDraft = NewBlueprintDraft()
                 done(true)
             } catch {
                 show(error)

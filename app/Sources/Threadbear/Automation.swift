@@ -948,6 +948,18 @@ enum Automation {
             NSApp.activate()
             window.orderFrontRegardless()
             return "ok"
+        case "new-blueprint":
+            // The New blueprint page, as the list's button opens it, with
+            // its fields filled from what's given: "project" (an id, or
+            // "new"), "title", "folder", "text". Says the draft back.
+            app.newBlueprint()
+            if let project = c["project"] as? String { app.newBlueprintDraft.projectId = project == "new" ? NewBlueprintDraft.newProject : project }
+            if let title = c["title"] as? String { app.newBlueprintDraft.newTitle = title }
+            if let folder = c["folder"] as? String { app.newBlueprintDraft.newFolder = folder }
+            if let text = c["text"] as? String { app.newBlueprintDraft.text = text }
+            try? await Task.sleep(for: .milliseconds(200))
+            let draft = app.newBlueprintDraft
+            return "ok project=\(draft.projectId) title=\(draft.newTitle) folder=\(draft.newFolder) text=\(draft.text.count) chars"
         case "mode":
             let started = CFAbsoluteTimeGetCurrent()
             switch c["mode"] as? String {

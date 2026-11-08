@@ -725,8 +725,9 @@ want the questions after all.
 
 Start one from the Blueprints button under the Librarian's. The list is
 grouped by project, then by state: Waiting for you, Drafting, Ready, Building
-and Done. New blueprint is at the top: pick a project or make one, describe
-the feature and send. A blueprint is a thread, so it shows in the Inbox when
+and Done. New blueprint is at the top, and its form fills the centre of the
+window: pick a project or make one with a title and a folder, describe
+the feature and press Start. A blueprint is a thread, so it shows in the Inbox when
 it needs you, and opening it shows the form.
 
 A round has a title, a line on what the agent understood so far, and its

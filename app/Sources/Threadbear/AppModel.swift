@@ -458,6 +458,11 @@ final class AppModel {
     /// The ones with a thread are drawn from its summary, which is newer
     /// (AppModel+Blueprints.swift).
     var listedBlueprints: [Blueprint] = []
+    /// What's typed on the New blueprint page, kept while Mike looks at
+    /// other blueprints and comes back (in memory only).
+    var newBlueprintDraft = NewBlueprintDraft()
+    /// Asks the New blueprint page to put the cursor in the description.
+    var newBlueprintFocus = 0
     /// The runner answered `blueprints.list` with -32601: no Blueprints.
     var blueprintsUnsupported = false
     /// Each blueprint form's state on screen, by thread id: answers not
